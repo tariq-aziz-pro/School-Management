@@ -1,0 +1,35 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Create Student Account - School System{% endblock %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<style>
+    @media (max-width: 768px) {
+        .form-control, .btn { font-size: 0.9rem; }
+    }
+</style>
+
+<div class="container mt-5 col-md-6">
+    <h3 class="mb-4 text-primary">Create Student Account</h3>
+    
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="row g-3">
+            <div class="col-md-6">
+                {{ form.student_id|as_crispy_field }}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary mt-3">Create Account</button>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary mt-3">Cancel</a>
+    </form>
+</div>
+{% endblock %}

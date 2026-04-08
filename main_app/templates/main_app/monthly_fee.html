@@ -1,0 +1,70 @@
+{% extends 'main_app/base.html' %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Monthly Fee Management</h2>
+    {% if active_session %}
+        <p class="text-primary">Current Session: {{ active_session.session_name }}</p>
+    {% endif %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- Search Form -->
+    <form method="get" class="mb-4">
+        <div class="row">
+            <div class="col-md-3">
+                <select name="search_type" class="form-select">
+                    <option value="student_id" {% if search_type == 'student_id' %}selected{% endif %}>Student ID</option>
+                    <option value="father_name" {% if search_type == 'father_name' %}selected{% endif %}>Father Name</option>
+                    <option value="contact" {% if search_type == 'contact' %}selected{% endif %}>Contact</option>
+                </select>
+            </div>
+            <div class="col-md-6">
+                <input type="text" name="search" class="form-control" placeholder="Search..." value="{{ request.GET.search|default_if_none:'' }}">
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary w-100">Search</button>
+            </div>
+        </div>
+    </form>
+
+    <!-- Student Summary -->
+    {% if students %}
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Search Results</h5>
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Class</th>
+                            <th>Section</th>
+                            <th>Father Name</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in students %}
+                            <tr>
+                                <td>{{ student.student.first_name }} {{ student.student.last_name }}</td>
+                                <td>{{ student.class_name }}</td>
+                                <td>{{ student.section }}</td>
+                                <td>{{ student.student.father_guardian_name }}</td>
+                                <td>
+                                    <a href="{% url 'monthly_fee_detail' student.student.student_id %}" class="btn btn-primary">Take Action</a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

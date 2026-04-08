@@ -1,0 +1,127 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Developer Dashboard{% endblock %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<style>
+    .card-stats { border-radius: 8px; }
+    .table th, .table td { vertical-align: middle; }
+    .payment-status { font-size: 0.9em; }
+</style>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom px-4">
+    <div class="container-fluid position-relative w-100">
+        <span class="navbar-brand fw-bold">Developer Dashboard</span>
+        <div class="ms-auto">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-primary card-stats">
+                <div class="card-body">
+                    <h5 class="card-title">Total Schools</h5>
+                    <p class="card-text display-4">{{ total_schools }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-success card-stats">
+                <div class="card-body">
+                    <h5 class="card-title">Active Schools</h5>
+                    <p class="card-text display-4">{{ active_schools }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-info card-stats">
+                <div class="card-body">
+                    <h5 class="card-title">Total Students</h5>
+                    <p class="card-text display-4">{{ total_students }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3 mb-3">
+            <div class="card text-white bg-warning card-stats">
+                <div class="card-body">
+                    <h5 class="card-title">Pending Payments</h5>
+                    <p class="card-text display-4">{{ pending_payments }}</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schools List -->
+    <div class="card">
+        <div class="card-header">
+            <h5>Registered Schools</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>School Name</th>
+                        <th>City</th>
+                        <th>Admin Username</th>
+                        <th>Admin Email</th>
+                        <th>Students</th>
+                        <th>Subscription</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in schools_with_sub %}
+                        <tr>
+                            <td>{{ item.school.school_name }}</td>
+                            <td>{{ item.school.city }}</td>
+                            <td>{{ item.school.admin_user.username }}</td>
+                            <td>{{ item.school.admin_user.email }}</td>
+                            <td>{{ item.school.number_of_students }}</td>
+                            <td>
+                                {% if item.latest_sub %}
+                                    <span class="payment-status">
+                                        {{ item.latest_sub.payment_type|title }} ({{ item.latest_sub.payment_method|title }})
+                                        <br>{{ item.latest_sub.amount }} on {{ item.latest_sub.payment_date|date:"d M Y" }}
+                                        <br>Valid: {{ item.latest_sub.is_valid|yesno:"Yes,No" }}
+                                    </span>
+                                {% else %}
+                                    No subscription
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge bg-{% if item.school.is_active %}success{% else %}danger{% endif %}">
+                                    {{ item.school.is_active|yesno:"Active,Inactive" }}
+                                </span>
+                            </td>
+                            <td>
+                                <a href="{% url 'toggle_school_access' item.school.id %}" class="btn btn-sm btn-{% if item.school.is_active %}danger{% else %}success{% endif %}">
+                                    {{ item.school.is_active|yesno:"Deactivate,Activate" }}
+                                </a>
+                                <a href="{% url 'reset_admin_password' item.school.id %}" class="btn btn-sm btn-warning">Reset Password</a>
+                                <a href="{% url 'add_payment' item.school.id %}" class="btn btn-sm btn-primary">Add Payment</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

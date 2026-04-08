@@ -1,0 +1,84 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Student Records - School System{% endblock %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<style>
+    .table th, .table td { vertical-align: middle; }
+    @media (max-width: 768px) {
+        .table-responsive { overflow-x: auto; }
+        .form-control { font-size: 0.9rem; }
+    }
+</style>
+
+<div class="container-fluid mt-5">
+    <h3 class="mb-4 text-primary">Student Records</h3>
+    
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <form method="get" class="mb-3">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select name="class_assigned" class="form-control" onchange="this.form.submit()">
+                    <option value="">All Classes</option>
+                    {% for class in classes %}
+                        <option value="{{ class }}" {% if request.GET.class_assigned == class %}selected{% endif %}>{{ class }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <select name="section" class="form-control" onchange="this.form.submit()">
+                    <option value="">All Sections</option>
+                    {% for section in sections %}
+                        <option value="{{ section }}" {% if request.GET.section == section %}selected{% endif %}>{{ section }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="student_id" class="form-control" placeholder="Search by Student ID" value="{{ request.GET.student_id }}" oninput="this.form.submit()">
+            </div>
+        </div>
+    </form>
+
+    <div class="table-responsive">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Student ID</th>
+                    <th>Class</th>
+                    <th>Section</th>
+                    <th>Username</th>
+                    <th>Password</th>
+                    <th>Account Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for student in student_data %}
+                    <tr>
+                        <td>{{ student.student_id }}</td>
+                        <td>{{ student.class_assigned }}</td>
+                        <td>{{ student.section }}</td>
+                        <td>{{ student.username }}</td>
+                        <td>{{ student.password }}</td>
+                        <td>
+                            <span class="badge bg-{% if student.account_status == 'Created' %}success{% else %}warning{% endif %}">
+                                {{ student.account_status }}
+                            </span>
+                        </td>
+                    </tr>
+                {% empty %}
+                    <tr><td colspan="6">No students found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <a href="{% url 'student_user_create' %}" class="btn btn-primary mt-3">Create New Student Account</a>
+</div>
+{% endblock %}

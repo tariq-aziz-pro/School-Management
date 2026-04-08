@@ -1,0 +1,46 @@
+{% extends 'main_app/base.html' %}
+{% load static %}
+{% load phone_filters %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Payment Successful!</h2>
+    <div class="mb-4">
+        <h4>Student Information</h4>
+        <p><strong>Name:</strong> {{ monthly_fee.student_admission.student.first_name }} {{ monthly_fee.student_admission.student.last_name }}</p> <!-- Changed student to student_admission -->
+        <p><strong>Father/Guardian Name:</strong> {{ monthly_fee.student_admission.student.father_guardian_name }}</p> <!-- Changed student to student_admission -->
+        <p><strong>Class:</strong> {{ monthly_fee.student_admission.class_name }}</p>
+        <p><strong>Roll Number:</strong> {{ monthly_fee.student_admission.roll_number }}</p>
+        <p><strong>Section:</strong> {{ monthly_fee.student_admission.section }}</p>
+        <p><strong>Student ID:</strong> {{ monthly_fee.student_admission.student }}</p>
+        <p><strong>Contact:</strong> {{ monthly_fee.student_admission.student.contact }}</p> <!-- Changed student to student_admission -->
+    </div>
+    
+    <p>Fee recorded for {{ monthly_fee.student_admission.student.first_name }} {{ monthly_fee.student_admission.student.last_name }} for {{ monthly_fee.month }} {{ monthly_fee.year }}</p> <!-- Changed student to student_admission -->
+    
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <table class="table table-bordered">
+        <tr><th>Previous Balance</th><td>Rs {{ monthly_fee.previous_balance|floatformat:2 }}</td></tr>
+        <tr><th>Monthly Fee</th><td>Rs {{ monthly_fee.monthly_fee|floatformat:2 }}</td></tr>
+        <tr><th>Transport Fee</th><td>Rs {{ monthly_fee.transport_fee|floatformat:2 }}</td></tr>
+        <tr><th>Total Dues</th><td>Rs {{ monthly_fee.total_dues|floatformat:2 }}</td></tr>
+        <tr><th>Received</th><td>Rs {{ monthly_fee.received|floatformat:2 }}</td></tr>
+        <tr><th>Current Balance</th><td>Rs {{ monthly_fee.current_balance|floatformat:2 }}</td></tr>
+        <tr><th>Reviewed By</th><td>{{ monthly_fee.reviewed_by|default:"Not specified" }}</td></tr>
+    </table>
+
+    <div class="mt-3">
+        <a href="{% url 'monthly_fee_pdf' monthly_fee.id %}" class="btn btn-primary" target="_blank">Generate PDF</a>
+        <a href="https://wa.me/{{ monthly_fee.student_admission.student.contact|clean_phone_number }}?text=Here%20is%20the%20payment%20receipt%20for%20{{ monthly_fee.student_admission.student.first_name }}%20{{ monthly_fee.student_admission.student.last_name }}%20for%20{{ monthly_fee.month }}%20{{ monthly_fee.year }}:%20{{ request.scheme }}://{{ request.get_host }}{% url 'monthly_fee_pdf' monthly_fee.id %}" class="btn btn-success" target="_blank">WhatsApp</a> <!-- Changed student to student_admission -->
+        <a href="{% url 'dashboard' %}" class="btn btn-primary" target="_blank">Go To Dashboard</a>
+    </div>
+</div>
+{% endblock %}

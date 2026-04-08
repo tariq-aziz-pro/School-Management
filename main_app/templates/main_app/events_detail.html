@@ -1,0 +1,22 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Event Details</h2>
+    <div class="card">
+        <div class="card-body">
+            <p><strong>Event Type:</strong> {{ event.get_event_type_display }}</p>
+            <p><strong>Event For:</strong> {{ event.get_event_for_display }}</p>
+            <p><strong>Description:</strong> {{ event.description|default:"N/A" }}</p>
+            <p><strong>Event Date:</strong> {{ event.event_date }}</p>
+            <p><strong>Announcement Date:</strong> {{ event.announcement_date }}</p>
+            <p><strong>Arranged By:</strong> {{ event.arranged_by }}</p>
+            <div class="mt-3">
+                <a href="{% url 'events_update' event.pk %}" class="btn btn-warning">Edit</a>
+                <a href="{% url 'events_delete' event.pk %}" class="btn btn-danger">Delete</a>
+                <a href="{% url 'events_list' %}" class="btn btn-secondary">Back to List</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

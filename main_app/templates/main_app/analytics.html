@@ -1,0 +1,120 @@
+{% extends 'main_app/analytics_base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+
+{% block analytics_content %}
+<div class="container mt-4">
+    <h3 class="mb-3">📊 School Data Analysis</h3>
+
+    <form method="get" class="row mb-4">
+    <div class="col-md-4">
+        <label for="session">📘 Select Academic Session:</label>
+        <select name="session" id="session" class="form-control" onchange="this.form.submit()">
+            {% for session in all_sessions %}
+                <option value="{{ session.id }}" {% if session.id == selected_session.id %}selected{% endif %}>
+                    {{ session.session_name }}
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+</form>
+
+
+    <form method="post" id="analytics-form" class="border p-4 rounded shadow-sm bg-light">
+        {% csrf_token %}
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+                {{ form.model_name.label_tag }}
+                {{ form.model_name }}
+            </div>
+            <div class="col-md-4">
+                {{ form.x_axis.label_tag }}
+                {{ form.x_axis }}
+            </div>
+            <div class="col-md-4">
+                {{ form.y_axis.label_tag }}
+                {{ form.y_axis }}
+            </div>
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+                {{ form.chart_type.label_tag }}
+                {{ form.chart_type }}
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">Generate Chart</button>
+            </div>
+        </div>
+    </form>
+
+    <div class="mt-5">
+        {% if chart %}
+        <div class="mt-4">
+            {{ chart|safe }}
+        </div>
+    {% endif %}
+   </div>
+
+    {% if pie_chart %}
+    <div class="mt-5">
+        <h4>🎯 Student Distribution</h4>
+        {{ pie_chart|safe }}
+    </div>
+{% endif %}
+
+{% if bar_chart %}
+    <div class="mt-5">
+        <h4>💰 Financial Summary</h4>
+        {{ bar_chart|safe }}
+    </div>
+{% endif %}
+
+{% if trend_chart %}
+    <div class="mt-5">
+        <h4>📈 School Progress Trend</h4>
+        {{ trend_chart|safe }}
+    </div>
+{% endif %}
+
+
+    
+</div>
+
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $('#id_model_name').change(function () {
+        const modelName = $(this).val();
+        if (modelName) {
+            $.ajax({
+                url: "{% url 'get_model_fields' %}",
+                data: {
+                    model_name: modelName
+                },
+                success: function (data) {
+                    const xSelect = $('#id_x_axis');
+                    const ySelect = $('#id_y_axis');
+
+                    xSelect.empty();
+                    ySelect.empty();
+
+                    if (data.fields && data.fields.length > 0) {
+                        data.fields.forEach(function (field) {
+                            xSelect.append(new Option(field, field));
+                            ySelect.append(new Option(field, field));
+                        });
+                    } else {
+                        xSelect.append(new Option('No fields found', ''));
+                        ySelect.append(new Option('No fields found', ''));
+                    }
+                },
+                error: function () {
+                    alert("Error loading model fields.");
+                }
+            });
+        }
+    });
+</script>
+{% endblock %}

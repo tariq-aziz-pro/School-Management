@@ -1,0 +1,401 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Admin Dashboard{% endblock %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<style>
+    .sidebar {
+        background-color: #f5f6fa;
+        min-height: 100vh;
+        border-right: 1px solid #dee2e6;
+        padding-top: 20px;
+        transition: all 0.3s ease;
+        overflow-y: auto;
+    }
+    .sidebar .nav-link {
+        background-color: #1e88e5;
+        color: white;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        padding: 10px 15px;
+        display: flex;
+        align-items: center;
+        transition: background-color 0.2s ease-in-out;
+    }
+    .sidebar .nav-link:hover,
+    .sidebar .nav-link:focus {
+        background-color: #42a5f5;
+        color: white;
+        text-decoration: none;
+    }
+    .sidebar .nav-link.active {
+        background-color: #1565c0;
+        font-weight: bold;
+    }
+    .submenu .nav-link {
+        background-color: #64b5f6;
+        padding: 8px 15px 8px 40px;
+        margin-bottom: 5px;
+        border-radius: 4px;
+    }
+    .submenu .nav-link:hover {
+        background-color: #1e88e5;
+    }
+    .content-area {
+        background-color: #f5f6fa;
+        padding: 20px;
+    }
+    .card {
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    .card-body {
+        padding: 15px;
+    }
+    .card-text.display-4 {
+        font-size: 2.5rem;
+    }
+    .nav-link[data-bs-toggle="collapse"] {
+        cursor: pointer;
+    }
+    @media (max-width: 768px) {
+        .sidebar {
+            position: fixed;
+            top: 56px;
+            left: -250px;
+            width: 250px;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .content-area {
+            margin-left: 0;
+            transition: margin-left 0.3s ease;
+        }
+        .content-area.shifted {
+            margin-left: 250px;
+        }
+        .toggle-btn {
+            display: block;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1100;
+        }
+        #sidebarClose {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 220px;
+            z-index: 1100;
+        }
+        .sidebar.active #sidebarClose {
+            display: block;
+        }
+    }
+    @media (min-width: 769px) {
+        .toggle-btn {
+            display: none;
+        }
+    }
+</style>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom px-4">
+    <div class="container-fluid position-relative w-100">
+        <button class="btn btn-primary toggle-btn" id="sidebarToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <button class="btn btn-secondary toggle-btn" id="sidebarClose">
+            <i class="fas fa-times"></i>
+        </button>
+        <span class="navbar-brand fw-bold">Admin Dashboard</span>
+        {% if active_session %}
+            <div class="position-absolute top-50 start-50 translate-middle">
+                <span class="badge bg-primary">Active Session: {{ active_session.session_name }}</span>
+            </div>
+        {% endif %}
+        <div class="ms-auto">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar py-4" id="sidebar">
+            <h5 class="text-center fw-bold mb-4">Menu</h5>
+            <ul class="nav flex-column" id="sidebarMenu">
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="collapse" href="#sessionMenu" role="button" aria-expanded="false" aria-controls="sessionMenu" aria-label="Manage academic sessions">
+                        <i class="fas fa-calendar-alt me-2"></i> Start New Session
+                    </a>
+                    <ul class="list-unstyled ps-0 collapse submenu" id="sessionMenu" data-bs-parent="#sidebarMenu">
+                        <li><a class="nav-link" href="{% url 'create_session' %}"><i class="fas fa-plus me-2"></i> New Session</a></li>
+                        <li><a class="nav-link" href="{% url 'search_session' %}"><i class="fas fa-search me-2"></i> View Session</a></li>
+                        <li><a class="nav-link" href="{% url 'add_fee_structure' %}"><i class="fas fa-plus me-2"></i> Add Fee Structure</a></li>
+                        <li><a class="nav-link" href="{% url 'subject_list' %}"><i class="fas fa-list me-2"></i> Add Subjects</a></li>
+                        <li><a class="nav-link" href="{% url 'syllabus_list' %}"><i class="fas fa-plus me-2"></i> Add Syllabus</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'admission_form' %}" aria-label="Create new student admission"><i class="fas fa-user-plus me-2"></i> Admission</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'monthly_fee' %}" aria-label="Manage monthly fee payments"><i class="fas fa-hand-holding-usd me-2"></i> Monthly Fee</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="collapse" href="#addMembersMenu" role="button" aria-expanded="false" aria-controls="addMembersMenu" aria-label="Manage school members">
+                        <i class="fas fa-user-plus me-2"></i> Add Members
+                    </a>
+                    <ul class="list-unstyled ps-0 collapse submenu" id="addMembersMenu" data-bs-parent="#sidebarMenu">
+                        <li><a class="nav-link" href="#"><i class="fas fa-user-tie me-2"></i> Principal or Owner</a></li>
+                        <li><a class="nav-link" href="{% url 'student_user_create' %}"><i class="fas fa-user me-2"></i> Create Student Account</a></li>
+                        <li><a class="nav-link" href="#"><i class="fas fa-users-gear me-2"></i> Create Operator</a></li>
+                        <li><a class="nav-link" href="{% url 'student_list' %}"><i class="fas fa-users me-2"></i> View Student Accounts</a></li>
+                        <li><a class="nav-link" href="{% url 'teacher_create' %}"><i class="fas fa-plus me-2"></i> Create Teacher Account</a></li>
+                        <li><a class="nav-link" href="{% url 'teacher_list' %}"><i class="fas fa-list me-2"></i> View Teachers Accounts</a></li>
+                        <li class="nav-item">
+                        <a class="nav-link {% if not session_exists %}disabled{% endif %}" href="{% url 'staff_list' %}" aria-label="View staff details"><i class="fas fa-user-tie me-2"></i> Add Staff</a></li>
+                    </ul>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="collapse" href="#studentsMenu" role="button" aria-expanded="false" aria-controls="studentsMenu" aria-label="Manage student promotions">
+                        <i class="fas fa-user-graduate me-2"></i> Students
+                    </a>
+                    <ul class="list-unstyled ps-0 collapse submenu" id="studentsMenu" data-bs-parent="#sidebarMenu">
+                        <li><a class="nav-link" href="{% url 'promote_offline_student' %}"><i class="fas fa-user-plus me-2"></i> Promote Offline Students</a></li>
+                        <li><a class="nav-link" href="{% url 'promote_existing_students' %}"><i class="fas fa-user-plus me-2"></i> Promote Existing Students</a></li>
+                    </ul>
+                </li>
+
+                
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'assets_list' %}" aria-label="View school assets"><i class="fas fa-boxes-stacked me-2"></i> Assets</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'expenses_list' %}" aria-label="View school expenses"><i class="fas fa-receipt me-2"></i> Expenses</a>
+                </li>
+
+                
+
+                <li class="nav-item">
+                    <a class="nav-link {% if not session_exists %}disabled{% endif %}" href="{% url 'transport_list' %}" aria-label="Manage transport services"><i class="fas fa-bus me-2"></i> Transport</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if not session_exists %}disabled{% endif %}" href="{% url 'events_list' %}" aria-label="Manage school events"><i class="fas fa-calendar-day me-2"></i> Events</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link {% if not session_exists %}disabled{% endif %}" href="{% url 'analytics' %}" aria-label="View analytics"><i class="fas fa-chart-bar me-2"></i> Analytics</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'session_analytics' %}" aria-label="View session analysis"><i class="fas fa-chart-pie me-2"></i> Session Analysis</a>
+                </li>
+
+                <li class="nav-item">
+                    <a class="nav-link" data-bs-toggle="collapse" href="#dataMenu" role="button" aria-expanded="false" aria-controls="dataMenu" aria-label="Manage data backups">
+                        <i class="fas fa-database me-2"></i> Back up Data
+                    </a>
+                    <ul class="list-unstyled ps-0 collapse submenu" id="dataMenu" data-bs-parent="#sidebarMenu">
+                        <li>
+                            <form action="{% url 'download_backup' %}" method="post" class="d-flex flex-column px-3">
+                                {% csrf_token %}
+                                <input type="hidden" name="session" value="{{ active_session.id }}">
+                                <select name="format" class="form-select form-select-sm mb-2">
+                                    <option value="excel">Excel</option>
+                                    <option value="csv">CSV (Zip)</option>
+                                </select>
+                                <button type="submit" name="preview" value="1" class="btn btn-outline-primary btn-sm" onclick="this.disabled=true; this.innerHTML='<span class=\"spinner-border spinner-border-sm\" role=\"status\" aria-hidden=\"true\"></span> Loading...';">
+                                    📄 Preview Backup
+                                </button>
+                            </form>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-md-10 content-area" id="mainContent">
+            <h2 class="mb-4">Welcome, {{ request.user.username }}!</h2>
+            {% if request.user.user_type == 1 %}
+                <p>School: {{ request.user.school.school_name }}</p>
+            {% endif %}
+
+            {% if not session_exists %}
+                <div class="alert alert-warning">
+                    <h4>No Session Found</h4>
+                    <p>Please create an academic session to manage students.</p>
+                    <a href="{% url 'create_session' %}" class="btn btn-primary">Create Session</a>
+                </div>
+            {% else %}
+                <!-- Session Stats -->
+                <div class="row mb-4">
+                    <div class="col-md-3 mb-3">
+                        <div class="card text-white bg-primary" data-bs-toggle="tooltip" title="Total students enrolled in the current session">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Students</h5>
+                                <p class="card-text display-4">{{ total_students }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card text-white bg-success" data-bs-toggle="tooltip" title="New admissions in the current session">
+                            <div class="card-body">
+                                <h5 class="card-title">New Admissions</h5>
+                                <p class="card-text display-4">{{ new_admissions }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card text-white bg-info" data-bs-toggle="tooltip" title="Students promoted to the next class">
+                            <div class="card-body">
+                                <h5 class="card-title">Promoted Students</h5>
+                                <p class="card-text display-4">{{ promoted_students }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card text-white bg-warning" data-bs-toggle="tooltip" title="Total outstanding student fees">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Balance</h5>
+                                <p class="card-text display-4">{{ total_balance }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title">Current Session: {{ active_session.session_name }}</h5>
+                        <p>Start Date: {{ active_session.start_date|date:"d M Y" }}</p>
+                        <p>End Date: {{ active_session.end_date|date:"d M Y" }}</p>
+                        <p>Total Classes: {{ total_classes }}</p>
+                        <p>Total Sections: {{ total_sections }}</p>
+                    </div>
+                </div>
+
+                <!-- Search Form -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Search Students</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" id="search-form">
+                            <div class="row">
+                                <div class="col-md-4 mb-2">
+                                    <select name="search_type" class="form-select" required>
+                                        <option value="" {% if not search_type %}selected{% endif %}>Select Search Type</option>
+                                        <option value="student_id" {% if search_type == 'student_id' %}selected{% endif %}>Student ID</option>
+                                        <option value="contact" {% if search_type == 'contact' %}selected{% endif %}>Contact</option>
+                                        <option value="father_name" {% if search_type == 'father_name' %}selected{% endif %}>Father/Guardian Name</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-2">
+                                    <input type="text" name="search_value" value="{{ search_value|default:'' }}" class="form-control" placeholder="Enter student ID, contact, or father/guardian name" required>
+                                </div>
+                                <div class="col-md-2 mb-2">
+                                    <button type="submit" class="btn btn-primary w-100">Search</button>
+                                </div>
+                                <div class="col-md-2 mb-2">
+                                    <button type="button" class="btn btn-secondary w-100" onclick="document.getElementById('search-form').reset();">Clear</button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Search Results -->
+                {% if search_results %}
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>Search Results ({{ search_results|length }} found)</h5>
+                        </div>
+                        <div class="card-body">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Student Name</th>
+                                        <th>Class</th>
+                                        <th>Section</th>
+                                        <th>Father/Guardian Name</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for admission in search_results %}
+                                        <tr>
+                                            <td>{{ admission.student.first_name }} {{ admission.student.last_name }}</td>
+                                            <td>{{ admission.class_name|default:"N/A" }}</td>
+                                            <td>{{ admission.section|default:"N/A" }}</td>
+                                            <td>{{ admission.student.father_guardian_name|default:"N/A" }}</td>
+                                            <td>
+                                                <a href="{% url 'edit_student' admission.student.student_id %}" class="btn btn-sm btn-warning">Edit</a>
+                                                <a href="{% url 'monthly_fee_detail' admission.student.student_id %}" class="btn btn-sm btn-primary">Fees</a>
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebarClose = document.getElementById('sidebarClose');
+    const sidebar = document.getElementById('sidebar');
+    const mainContent = document.getElementById('mainContent');
+
+    sidebarToggle.addEventListener('click', function () {
+        sidebar.classList.add('active');
+        mainContent.classList.add('shifted');
+        sidebarClose.style.display = 'block';
+    });
+
+    sidebarClose.addEventListener('click', function () {
+        sidebar.classList.remove('active');
+        mainContent.classList.remove('shifted');
+        sidebarClose.style.display = 'none';
+    });
+
+    const collapseElements = document.querySelectorAll('.collapse');
+    collapseElements.forEach((collapse) => {
+        const trigger = document.querySelector(`[href="#${collapse.id}"]`);
+        trigger.addEventListener('click', function (e) {
+            collapseElements.forEach((otherCollapse) => {
+                if (otherCollapse.id !== collapse.id && otherCollapse.classList.contains('show')) {
+                    new bootstrap.Collapse(otherCollapse).hide();
+                }
+            });
+        });
+    });
+
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.forEach(function (tooltipTriggerEl) {
+        new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+</script>
+{% endblock %}
+{% endblock %}
+

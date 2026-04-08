@@ -1,0 +1,60 @@
+{% extends 'main_app/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Teachers</h2>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    <div class="mb-3">
+        <a href="{% url 'teacher_create' %}" class="btn btn-primary">Add Teacher</a>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+    </div>
+    <div class="card">
+        <div class="card-header">
+            <h5>Teacher List</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Contact</th>
+                        <th>CNIC</th>
+                        <th>Class</th>
+                        <th>Section</th>
+                        <th>Subjects</th>
+                        <th>Salary</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for teacher in teachers %}
+                        <tr>
+                            <td>{{ teacher.name }}</td>
+                            <td>{{ teacher.contact }}</td>
+                            <td>{{ teacher.cnic }}</td>
+                            <td>{{ teacher.class_name }}</td>
+                            <td>{{ teacher.section }}</td>
+                            <td>{{ teacher.subjects.all|join:", " }}</td>
+                            <td>Rs {{ teacher.salary|floatformat:2 }}</td>
+                            <td>
+                                <a href="{% url 'teacher_update' teacher.id %}" class="btn btn-sm btn-warning">Edit</a>
+                                <a href="{% url 'teacher_delete' teacher.id %}" class="btn btn-sm btn-danger">Delete</a>
+                            </td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="8">No teachers found.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

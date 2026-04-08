@@ -1,0 +1,9 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+    <h2>No Active Session Found</h2>
+    <p>Please create an active academic session to manage assets.</p>
+    <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

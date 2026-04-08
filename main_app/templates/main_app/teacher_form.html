@@ -1,0 +1,64 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>{{ action }} Teacher</h2>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    <div class="card">
+        <div class="card-header">
+            <h5>{{ action }} Teacher Form</h5>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {{ form.non_field_errors }}
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">{{ form.name|as_crispy_field }}</div>
+                        <div class="mb-3">
+                            {{ form.contact|as_crispy_field }}
+                            <small class="form-text text-muted">Format: +923xxxxxxxxx or 03xxxxxxxxx</small>
+                        </div>
+                        <div class="mb-3">
+                            {{ form.cnic|as_crispy_field }}
+                            <small class="form-text text-muted">Format: 12345-1234567-1</small>
+                        </div>
+                        <div class="mb-3">{{ form.gender|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.class_name|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.section|as_crispy_field }}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">{{ form.subjects|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.education|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.salary|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.date_of_join|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.dob|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.address|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.children_in_school|as_crispy_field }}</div>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">{{ form.username|as_crispy_field }}</div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">{{ form.password|as_crispy_field }}</div>
+                        <div class="mb-3">{{ form.confirm_password|as_crispy_field }}</div>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success">{{ action }} Teacher</button>
+                <a href="{% url 'teacher_list' %}" class="btn btn-secondary">Cancel</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

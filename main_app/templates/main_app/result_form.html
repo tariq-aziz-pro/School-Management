@@ -1,0 +1,68 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>{{ action }} Result</h2>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    <div class="card">
+        <div class="card-header">
+            <h5>{{ action }} Result Form</h5>
+        </div>
+        <div class="card-body">
+            <form method="post" id="resultForm">
+                {% csrf_token %}
+                <div class="row">
+                    <div class="col-md-6">
+                        {{ form.student_admission|as_crispy_field }}
+                        {{ form.subject|as_crispy_field }}
+                        {{ form.exam_type|as_crispy_field }}
+                    </div>
+                    <div class="col-md-6">
+                        {{ form.theory|as_crispy_field }}
+                        {{ form.practical|as_crispy_field }}
+                        {{ form.obtained_marks|as_crispy_field }}
+                        {{ form.total_marks|as_crispy_field }}
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-success">{{ action }} Result</button>
+                <a href="{% url 'teacher_dashboard' %}" class="btn btn-secondary">Cancel</a>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const theoryInput = document.querySelector('#id_theory');
+    const practicalInput = document.querySelector('#id_practical');
+    const totalMarksInput = document.querySelector('#id_total_marks');
+
+    function updateTotalMarks() {
+        const theory = parseFloat(theoryInput.value) || 0;
+        const practical = parseFloat(practicalInput.value) || 0;
+        if (theory > 0 || practical > 0) {
+            totalMarksInput.value = (theory + practical).toFixed(1);
+            totalMarksInput.setAttribute('readonly', 'readonly');
+        } else {
+            totalMarksInput.removeAttribute('readonly');
+            totalMarksInput.value = totalMarksInput.value || 100;
+        }
+    }
+
+    theoryInput.addEventListener('input', updateTotalMarks);
+    practicalInput.addEventListener('input', updateTotalMarks);
+    updateTotalMarks(); // Initial calculation
+});
+</script>
+{% endblock %}
+{% endblock %}

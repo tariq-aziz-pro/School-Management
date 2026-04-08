@@ -1,0 +1,23 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Asset Details</h2>
+    <div class="card">
+        <div class="card-body">
+            <p><strong>Name:</strong> {{ asset.name }}</p>
+            <p><strong>Purchased Date:</strong> {{ asset.purchased_date }}</p>
+            <p><strong>File Number:</strong> {{ asset.file_number }}</p>
+            <p><strong>Value:</strong> {{ asset.value }}</p>
+            <p><strong>Purchased By:</strong> {{ asset.purchased_by }}</p>
+            <p><strong>Description:</strong> {{ asset.description|default:"N/A" }}</p>
+            <p><strong>Condition:</strong> {{ asset.get_condition_display }}</p>
+            <div class="mt-3">
+                <a href="{% url 'assets_update' asset.pk %}" class="btn btn-warning">Edit</a>
+                <a href="{% url 'assets_delete' asset.pk %}" class="btn btn-danger">Delete</a>
+                <a href="{% url 'assets_list' %}" class="btn btn-secondary">Back to List</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

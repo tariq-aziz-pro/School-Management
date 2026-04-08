@@ -1,0 +1,158 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Mark Student as Not Promoted</h2>
+    <p>Confirm that <strong>{{ student.first_name }} {{ student.last_name }}</strong> will remain in <strong>{{ student.class_name }} - 
+        {% for section_value, section_label in SECTION_CHOICES %}
+            {% if section_value == student.section %}
+                {{ section_label }}
+            {% endif %}
+        {% endfor %}</strong> for the current session ({{ active_session }}).</p>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags }}{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="row">
+            <div class="col-md-6">
+                <h4>Academic Details</h4>
+                {{ form.class_name|as_crispy_field }}
+                {{ form.section|as_crispy_field }}
+                {{ form.roll_number|as_crispy_field }}
+                <h4>Transport Details</h4>
+                {{ form.transport|as_crispy_field }}
+                <div id="transport-fields">
+                    {{ form.vehicle_no|as_crispy_field }}
+                    {{ form.route|as_crispy_field }}
+                    {{ form.driver_contact|as_crispy_field }}
+                    {{ form.transport_fee|as_crispy_field }}
+                </div>
+            </div>
+            <div class="col-md-6">
+                <h4>Fee Details</h4>
+                {{ form.previous_balance|as_crispy_field }}
+                {{ form.tuition_fee|as_crispy_field }}
+                {{ form.exam_fee|as_crispy_field }}
+                {{ form.book_fee|as_crispy_field }}
+                {{ form.uniform_fee|as_crispy_field }}
+                {{ form.other_fee|as_crispy_field }}
+                {{ form.promotion_fee|as_crispy_field }}
+                {{ form.discount|as_crispy_field }}
+                {{ form.discount_behalf|as_crispy_field }}
+                {{ form.received|as_crispy_field }}
+                {{ form.total_dues|as_crispy_field }}
+                {{ form.balance|as_crispy_field }}
+                {{ form.image|as_crispy_field }}
+            </div>
+        </div>
+        <button type="submit" class="btn btn-danger mt-3">Confirm Not Promoted</button>
+        <a href="{% url 'promote_existing_students' %}?class_name={{ filtered_class|urlencode }}§ion={{ filtered_section|urlencode }}" class="btn btn-secondary mt-3">Cancel</a>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function() {
+    // Debug: Confirm jQuery is loaded
+    console.log('jQuery version:', $.fn.jquery);
+
+    // Function to calculate total dues and balance
+    function calculateTotals() {
+        var previous_balance = parseFloat($('#id_previous_balance').val()) || 0;
+        var tuition_fee = parseFloat($('#id_tuition_fee').val()) || 0;
+        var exam_fee = parseFloat($('#id_exam_fee').val()) || 0;
+        var book_fee = parseFloat($('#id_book_fee').val()) || 0;
+        var uniform_fee = parseFloat($('#id_uniform_fee').val()) || 0;
+        var other_fee = parseFloat($('#id_other_fee').val()) || 0;
+        var promotion_fee = parseFloat($('#id_promotion_fee').val()) || 0;
+        var transport_fee = parseFloat($('#id_transport_fee').val()) || 0;
+        var discount = parseFloat($('#id_discount').val()) || 0;
+        var received = parseFloat($('#id_received').val()) || 0;
+
+        var total_dues = (
+            previous_balance +
+            tuition_fee +
+            exam_fee +
+            book_fee +
+            uniform_fee +
+            other_fee +
+            promotion_fee +
+            transport_fee -
+            discount
+        );
+
+        var balance = total_dues - received;
+
+        $('#id_total_dues').val(total_dues.toFixed(2));
+        $('#id_balance').val(balance.toFixed(2));
+    }
+
+    // Function to update transport fields visibility
+    function updateTransportFields() {
+        var transport = $('#id_transport').val();
+        console.log('Transport value:', transport); // Debug
+
+        // Target crispy-forms' control-group (adjust if different)
+        var $vehicleNo = $('[for="id_vehicle_no"]').closest('.control-group');
+        var $route = $('[for="id_route"]').closest('.control-group');
+        var $driverContact = $('[for="id_driver_contact"]').closest('.control-group');
+        var $transportFee = $('[for="id_transport_fee"]').closest('.control-group');
+
+        if (transport === 'No') {
+            $vehicleNo.hide();
+            $route.hide();
+            $driverContact.hide();
+            $transportFee.hide();
+            $('#id_vehicle_no, #id_route, #id_driver_contact, #id_transport_fee').val('');
+            $('#id_transport_fee').val('0.00');
+        } else if (transport === 'Free') {
+            $vehicleNo.show();
+            $route.show();
+            $driverContact.show();
+            $transportFee.hide();
+            $('#id_transport_fee').val('0.00');
+        } else if (transport === 'Paid') {
+            $vehicleNo.show();
+            $route.show();
+            $driverContact.show();
+            $transportFee.show();
+        }
+
+        console.log('Vehicle No visible:', $vehicleNo.is(':visible')); // Debug
+        calculateTotals();
+    }
+
+    // Event listeners
+    $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input', calculateTotals);
+    $('#id_transport').on('change', updateTransportFields);
+
+    // Initial setup
+    updateTransportFields();
+    calculateTotals();
+});
+
+//prevent value chnage 
+    // Prevent scroll from changing number inputs when focused
+  document.addEventListener('wheel', function (e) {
+    if (document.activeElement.type === 'number' && document.activeElement === e.target) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // Optional: Also disable scroll using arrow keys when focused
+  document.addEventListener('keydown', function (e) {
+    if (document.activeElement.type === 'number' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+    }
+  });
+</script>
+{% endblock %}

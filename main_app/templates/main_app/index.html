@@ -1,0 +1,11 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Home - School System{% endblock %}
+
+{% block content %}
+<div class="text-center">
+    <h1>Welcome to PowerLink School Management System</h1>
+    <p class="lead">Streamline your school’s operations with ease.</p>
+    <a href="{% url 'login' %}" class="btn btn-primary btn-lg me-2">Login</a>
+    <a href="{% url 'register_school' %}" class="btn btn-secondary btn-lg">Register School</a>
+</div>
+{% endblock %}

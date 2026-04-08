@@ -1,0 +1,25 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Transport Details</h2>
+    <div class="card">
+        <div class="card-body">
+            <p><strong>Vehicle Number:</strong> {{ transport.vehicle_number }}</p>
+            <p><strong>Driver Name:</strong> {{ transport.driver_name }}</p>
+            <p><strong>Driver CNIC:</strong> {{ transport.driver_cnic }}</p>
+            <p><strong>Address:</strong> {{ transport.address }}</p>
+            <p><strong>Date of Joining:</strong> {{ transport.date_of_joining }}</p>
+            <p><strong>Date of Birth:</strong> {{ transport.date_of_birth }}</p>
+            <p><strong>Number of Students:</strong> {{ transport.number_of_students }}</p>
+            <p><strong>Route:</strong> {{ transport.route }}</p>
+            <p><strong>Contact:</strong> {{ transport.contact }}</p>
+            <div class="mt-3">
+                <a href="{% url 'transport_update' transport.pk %}" class="btn btn-warning">Edit</a>
+                <a href="{% url 'transport_delete' transport.pk %}" class="btn btn-danger">Delete</a>
+                <a href="{% url 'transport_list' %}" class="btn btn-secondary">Back to List</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

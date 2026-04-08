@@ -1,0 +1,42 @@
+{% load crispy_forms_tags %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Student Admission</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h2>Student Admission</h2>
+    <form method="post">
+        {% csrf_token %}
+        {{ form|crispy }}
+    </form>
+
+    <script>
+        $(document).ready(function() {
+            $('#id_class_name').change(function() {
+                var className = $(this).val();
+                if (className) {
+                    $.ajax({
+                        url: "{% url 'get_fee_structure' %}",
+                        data: {'class_name': className},
+                        dataType: 'json',
+                        success: function(data) {
+                            if (!data.error) {
+                                $('#id_tuition_fee').val(data.tuition_fee);
+                                $('#id_admission_fee').val(data.admission_fee);
+                                $('#id_book_fee').val(data.book_fee);
+                                $('#id_uniform_fee').val(data.uniform_fee);
+                                $('#id_exam_fee').val(data.exam_fee);
+                                $('#id_promotion_fee').val(data.promotion_fee);
+                            } else {
+                                alert(data.error);
+                            }
+                        }
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

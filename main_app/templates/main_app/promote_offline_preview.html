@@ -1,0 +1,32 @@
+{% extends 'main_app/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Preview Promotion Details</h2>
+    <p>Please review the details below before confirming the promotion.</p>
+
+    <h4>Student Details</h4>
+    <p><strong>Name:</strong> {{ promote_data.first_name }} {{ promote_data.last_name }}</p>
+    <p><strong>Class:</strong> {{ promote_data.class_name }}</p>
+    <p><strong>Section:</strong> {{ promote_data.section }}</p>
+    <p><strong>Roll Number:</strong> {{ promote_data.roll_number }}</p>
+    <p><strong>Father/Guardian Name:</strong> {{ promote_data.father_guardian_name }}</p>
+    <p><strong>Contact:</strong> {{ promote_data.contact }}</p>
+
+    <h4>Fee Details</h4>
+    <p><strong>Tuition Fee:</strong> Rs {{ fees.tuition_fee|floatformat:2 }}</p>
+    <p><strong>Book Fee:</strong> Rs {{ fees.book_fee|floatformat:2 }}</p>
+    <p><strong>Uniform Fee:</strong> Rs {{ fees.uniform_fee|floatformat:2 }}</p>
+    <p><strong>Paper Money:</strong> Rs {{ fees.other_fee|floatformat:2 }}</p>
+    <p><strong>Promotion Fee:</strong> Rs {{ fees.promotion_fee|floatformat:2 }}</p>
+    <p><strong>Other Charges:</strong> Rs {{ fees.other_charges|floatformat:2 }}</p>
+    <p><strong>Admission Fee:</strong> Rs {{ fees.admission_fee|floatformat:2 }} (Not applicable for promoted students)</p>
+
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" name="confirm" class="btn btn-success">Confirm Promotion</button>
+        <button type="submit" name="edit" class="btn btn-secondary">Edit Details</button>
+    </form>
+</div>
+{% endblock %}

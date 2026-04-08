@@ -1,0 +1,92 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Promote Existing Students</h2>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'warning' %}alert-warning{% else %}alert-{{ message.tags }}{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+    {% if no_previous_session %}
+        <div class="alert alert-warning">
+            No previous academic session found. Please create an academic session first.
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
+    {% else %}
+        <form method="post" class="form-inline mb-4">
+            {% csrf_token %}
+            <div class="form-group mr-3 mb-2">
+                <label for="class_name" class="mr-2">Class:</label>
+                <select name="class_name" id="class_name" class="form-control">
+                    <option value="">Select Class</option>
+                    {% for class_name in class_choices %}
+                        <option value="{{ class_name }}" {% if class_name == selected_class_name %}selected{% endif %}>{{ class_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group mr-3 mb-2">
+                <label for="section" class="mr-2">Section:</label>
+                <select name="section" id="section" class="form-control">
+                    <option value="">Select Section</option>
+                    {% for section in section_choices %}
+                        <option value="{{ section.0 }}" {% if section.0 == selected_section %}selected{% endif %}>{{ section.1 }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary mb-2">Filter Students</button>
+        </form>
+        {% if students %}
+            <h4>Students in {{ selected_class_name }} - {{ selected_section }}</h4>
+            <table class="table table-bordered">
+                <thead>
+                    <tr>
+                        <th>Student ID</th>
+                        <th>Name</th>
+                        <th>Roll Number</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for student in students %}
+                        <tr>
+                            <td>{{ student.student.student_id }}</td>
+                            <td>{{ student.student.first_name }} {{ student.student.last_name }}</td>
+                            <td>{{ student.roll_number }}</td>
+                            <td>
+                                {% if student.promoted %}
+                                    {% if student.failed_to_promote %}
+                                        <span class="badge bg-danger">Not Promoted</span>
+                                    {% else %}
+                                        <span class="badge bg-success">Promoted</span>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-warning">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if student.promoted %}
+                                    <button class="btn btn-sm btn-primary mr-2" disabled>Promote</button>
+                                    <button class="btn btn-sm btn-danger" disabled>Not Promote</button>
+                                {% else %}
+                                    <a href="{% url 'promote_existing_student' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"class="btn btn-sm btn-primary mr-2">Promote</a>
+                                    <a href="{% url 'mark_not_promoted' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"class="btn btn-sm btn-danger">Not Promote</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% elif selected_class_name and selected_section %}
+            <div class="alert alert-info">
+                No students found in {{ selected_class_name }} - {{ selected_section }}.
+            </div>
+        {% endif %}
+        <a href="{% url 'dashboard' %}" class="btn btn-secondary mt-3">Back to Dashboard</a>
+    {% endif %}
+</div>
+{% endblock %}

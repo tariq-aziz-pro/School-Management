@@ -1,0 +1,11 @@
+{% extends 'main_app/base.html' %}
+{% load static %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Promotion Successful!</h2>
+    <p>Student {{ student.student.first_name }} {{ student.student.last_name }} has been successfully promoted to {{ student.class_name }}, section {{ student.section }}.</p> <!-- Updated to use student.student -->
+    <a href="{% url 'promote_offline_student' %}" class="btn btn-primary">Promote Another Student</a>
+    <a href="{% url 'promoted_students_report' %}" class="btn btn-secondary">View Promoted Students Report</a>
+</div>
+{% endblock %}

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Student Results</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .header img { max-width: 100px; }
+        .info { margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        h1, h2, h3 { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        {% if school.school_logo %}
+            <img src="{{ school.school_logo.path }}" alt="{{ school.school_name }} Logo">
+        {% endif %}
+        <h1>{{ school.school_name }}</h1>
+        <h2>Student Results - {{ active_session.session_name }}</h2>
+    </div>
+    <div class="info">
+        <p><strong>Student:</strong> {{ student.first_name }} {{ student.last_name }} ({{ student.student_id }})</p>
+        <p><strong>Class:</strong> {{ admission.class_name }} ({{ admission.section }})</p>
+        <p><strong>Class Teacher:</strong> {{ class_teacher.name|default:"Not assigned" }}</p>
+    </div>
+    {% if results %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Subject</th>
+                    <th>Exam Type</th>
+                    <th>Teacher</th>
+                    <th>Obtained Marks</th>
+                    <th>Total Marks</th>
+                    <th>Percentage</th>
+                    <th>Grade</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in results %}
+                    <tr>
+                        <td>{{ result.subject_name }}</td>
+                        <td>{{ result.exam_type }}</td>
+                        <td>{{ result.teacher_name }}</td>
+                        <td>{{ result.obtained_marks }}</td>
+                        <td>{{ result.total_marks }}</td>
+                        <td>{{ result.percentage|floatformat:2 }}%</td>
+                        <td>{{ result.grade }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No results available.</p>
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,24 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Staff Details</h2>
+    <div class="card">
+        <div class="card-body">
+            <p><strong>Name:</strong> {{ staff.name }}</p>
+            <p><strong>Designation:</strong> {{ staff.get_designation_display }}</p>
+            <p><strong>Salary:</strong> {{ staff.salary }}</p>
+            <p><strong>Date of Join:</strong> {{ staff.date_of_join }}</p>
+            <p><strong>CNIC:</strong> {{ staff.cnic }}</p>
+            <p><strong>Contact:</strong> {{ staff.contact }}</p>
+            <p><strong>Address:</strong> {{ staff.address|default:"N/A" }}</p>
+            <p><strong>Date of Birth:</strong> {{ staff.date_of_birth }}</p>
+            <div class="mt-3">
+                <a href="{% url 'staff_update' staff.pk %}" class="btn btn-warning">Edit</a>
+                <a href="{% url 'staff_delete' staff.pk %}" class="btn btn-danger">Delete</a>
+                <a href="{% url 'staff_list' %}" class="btn btn-secondary">Back to List</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "main_app/base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>📊 Session Analysis</h2>
+    <hr>
+
+    {% if session_data %}
+        <!-- Table -->
+        <div class="table-responsive mt-3">
+            <table class="table table-bordered table-hover">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Session</th>
+                        <th>Students</th>
+                        <th>Fees Collected</th>
+                        <th>Teacher Salaries</th>
+                        <th>Staff Salaries</th>
+                        <th>Expenses</th>
+                        <th>Assets</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in session_data %}
+                    <tr>
+                        <td>
+                            {{ row.session }}
+                            {% if sessions|length > 0 and sessions.0.session_name == row.session and sessions.0.is_active %}
+                                <span class="badge bg-success">Active</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.students }}</td>
+                        <td>Rs. {{ row.fee_collected }}</td>
+                        <td>Rs. {{ row.teacher_salaries }}</td>
+                        <td>Rs. {{ row.staff_salaries }}</td>
+                        <td>Rs. {{ row.expenses }}</td>
+                        <td>Rs. {{ row.assets }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Charts -->
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <h4>Financial Metrics Comparison</h4>
+                {{ bar_chart|safe }}
+            </div>
+            <div class="col-md-6">
+                <h4>Session Proportions</h4>
+                {% for session_name, pie_chart in pie_charts.items %}
+                    <div class="mb-4">
+                        <h5>{{ session_name }}</h5>
+                        {{ pie_chart|safe }}
+                    </div>
+                {% empty %}
+                    <p>No pie charts available.</p>
+                {% endfor %}
+            </div>
+        </div>
+    {% else %}
+        <div class="alert alert-info">No academic sessions found for this school.</div>
+    {% endif %}
+
+    <a href="{% url 'dashboard' %}" class="btn btn-primary mt-3">Back to Dashboard</a>
+</div>
+{% endblock %}

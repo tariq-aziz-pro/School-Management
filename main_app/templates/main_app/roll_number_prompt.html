@@ -1,0 +1,24 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Roll Number Conflict</h2>
+    <div class="alert alert-warning">
+        Roll number {{ original_roll_number }} is already assigned in {{ class_name }} - {{ section }} for the current session. Please enter a new roll number for {{ student.first_name }} {{ student.last_name }}.
+    </div>
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags }}{% endif %}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        {{ form|crispy }}
+        <button type="submit" class="btn btn-primary mt-3">Submit</button>
+        <a href="{% url 'promote_existing_students' %}?class_name={{ filtered_class|urlencode }}&section={{ filtered_section|urlencode }}" class="btn btn-secondary mt-3">Cancel</a>
+    </form>
+</div>
+{% endblock %}

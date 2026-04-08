@@ -1,0 +1,66 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<div class="container text-center mt-4">
+<div class="row justify-content-center">
+    <div class="col-4">
+        <div class="card shadow rounded">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0">Add Fee Structure</h4>
+                </div>
+            <div class="card-body">
+            
+                    <form method="POST">
+                        {% csrf_token %}
+                        {{ form|crispy }}
+                        <button type="submit" class="btn btn-success mt-3">Save Fee Structure</button>
+                    </form>
+                <h5 class="mt-5">Already Added Classes for {{ active_session.session_name }}</h5>
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th>Class</th>
+                            <th>Tuition Fee</th>
+                            <th>Admission Fee</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for fee in existing_fees %}
+                        <tr>
+                            <td>{{ fee.class_name }}</td>
+                            <td>{{ fee.tuition_fee }}</td>
+                            <td>{{ fee.admission_fee }}</td>
+                            <td>
+                                <a href="{% url 'edit_fee_structure' fee.id %}" class="btn btn-sm btn-primary">Edit</a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="4">No records yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+
+
+            {% if messages %}
+                <script>
+                    {% for message in messages %}
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Success!',
+                            text: '{{ message }}',
+                            confirmButtonColor: '#3085d6',
+                            confirmButtonText: 'OK'
+                        });
+                    {% endfor %}
+                </script>
+            {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+<a href="{% url 'dashboard' %}" class="btn btn-info">Dashboard</a>
+</div>
+{% endblock %}
+

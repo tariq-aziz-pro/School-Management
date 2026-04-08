@@ -1,0 +1,265 @@
+{% extends 'main_app/base.html' %}
+{% block title %}Teacher Dashboard{% endblock %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<style>
+    .sidebar {
+        background-color: #f8f9fa;
+        min-height: 100vh;
+        border-right: 1px solid #ccc;
+        padding-top: 20px;
+        transition: all 0.3s ease;
+    }
+    .sidebar .nav-link {
+        background-color: #0d47a1;
+        color: white;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        padding: 10px 15px;
+        display: flex;
+        align-items: center;
+        transition: background-color 0.2s ease-in-out;
+    }
+    .sidebar .nav-link:hover,
+    .sidebar .nav-link:focus {
+        background-color: #08855d;
+        color: white;
+        text-decoration: none;
+    }
+    .sidebar .nav-link.active {
+        background-color: #1565d0;
+        font-weight: bold;
+    }
+    .content-area {
+        padding: 20px;
+    }
+    @media (max-width: 768px) {
+        .sidebar {
+            position: fixed;
+            top: 56px;
+            left: -250px;
+            width: 250px;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+        .sidebar.active {
+            left: 0;
+        }
+        .content-area {
+            margin-left: 0;
+            transition: margin-left 0.3s ease;
+        }
+        .content-area.shifted {
+            margin-left: 250px;
+        }
+        .toggle-btn {
+            display: block;
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            z-index: 1100;
+        }
+    }
+    @media (min-width: 769px) {
+        .toggle-btn {
+            display: none;
+        }
+    }
+</style>
+
+<nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom px-4">
+    <div class="container-fluid position-relative w-100">
+        <button class="btn btn-primary toggle-btn" id="sidebarToggle">
+            <i class="fas fa-bars"></i>
+        </button>
+        <span class="navbar-brand fw-bold">Teacher Dashboard</span>
+        {% if active_session %}
+            <div class="position-absolute top-50 start-50 translate-middle">
+                <span class="fw-bold text-primary">Active Session: {{ active_session.session_name }}</span>
+            </div>
+        {% endif %}
+        <div class="ms-auto">
+            <form method="post" action="{% url 'logout' %}">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger">Logout</button>
+            </form>
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-2 sidebar py-4" id="sidebar">
+            <h5 class="text-center fw-bold mb-4">Menu</h5>
+            <ul class="nav flex-column" id="sidebarMenu">
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'result_create' %}">
+                        <i class="fas fa-plus me-2"></i> Add Result
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'teacher_dashboard' %}">
+                        <i class="fas fa-list me-2"></i> View Results
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'add_syllabus' %}">
+                        <i class="fas fa-plus me-2"></i> Create Syllabus
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="#events">
+                        <i class="fas fa-calendar-alt me-2"></i> Events
+                    </a>
+                </li>
+            </ul>
+        </div>
+
+        <div class="col-md-10 content-area" id="mainContent">
+            <h2 class="mb-4">Welcome, {{ request.user.teacher.name }}!</h2>
+            <p>School: {{ request.user.school.school_name }}</p>
+            <p>Class: {{ request.user.teacher.class_name }} | Section: {{ request.user.teacher.section }}</p>
+
+            {% if messages %}
+                {% for message in messages %}
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+
+            {% if not active_session %}
+                <div class="alert alert-warning">
+                    <h4>No Active Session</h4>
+                    <p>Please contact the admin to create an active academic session.</p>
+                </div>
+            {% else %}
+                <!-- Student Results Section -->
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Student Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" id="filter-form">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <select name="exam_type" class="form-select">
+                                        <option value="">All Exam Types</option>
+                                        {% for choice in exam_types %}
+                                            <option value="{{ choice.0 }}" {% if exam_type == choice.0 %}selected{% endif %}>{{ choice.1 }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <select name="subject" class="form-select">
+                                        <option value="">All Subjects</option>
+                                        {% for subject in subjects %}
+                                            <option value="{{ subject.id }}" {% if subject_id == subject.id|stringformat:"s" %}selected{% endif %}>{{ subject.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <button type="submit" class="btn btn-primary w-100">Filter</button>
+                                </div>
+                            </div>
+                        </form>
+                        {% regroup results by student_admission.student.first_name as student_groups %}
+                        {% for student_group in student_groups %}
+                            <h4>{{ student_group.grouper }}</h4>
+                            {% regroup student_group.list by subject.name as subject_groups %}
+                            {% for subject_group in subject_groups %}
+                                <h5>{{ subject_group.grouper }}</h5>
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Exam Type</th>
+                                            <th>Theory</th>
+                                            <th>Practical</th>
+                                            <th>Total Marks</th>
+                                            <th>Obtained Marks</th>
+                                            <th>Percentage</th>
+                                            <th>Grade</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for result in subject_group.list %}
+                                            <tr>
+                                                <td>{{ result.exam_type }}</td>
+                                                <td>{{ result.theory }}</td>
+                                                <td>{{ result.practical }}</td>
+                                                <td>{{ result.total_marks }}</td>
+                                                <td>{{ result.obtained_marks }}</td>
+                                                <td>{{ result.percentage|floatformat:2 }}%</td>
+                                                <td>{{ result.grade }}</td>
+                                                <td>
+                                                    <a href="{% url 'result_edit' result.id %}" class="btn btn-sm btn-warning">Edit</a>
+                                                    <a href="{% url 'result_delete' result.id %}" class="btn btn-sm btn-danger">Delete</a>
+                                                </td>
+                                            </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            {% endfor %}
+                        {% empty %}
+                            <p>No results found.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <!-- Events Section -->
+                <div id="events" class="card mb-4">
+                    <div class="card-header">
+                        <h5>Upcoming Events - {{ active_session.session_name }}</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if events %}
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Event Type</th>
+                                        <th>Event Date</th>
+                                        <th>Announcement Date</th>
+                                        <th>Description</th>
+                                        <th>Arranged By</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for event in events %}
+                                        <tr>
+                                            <td>{{ event.get_event_type_display }}</td>
+                                            <td>{{ event.event_date }}</td>
+                                            <td>{{ event.announcement_date }}</td>
+                                            <td>{{ event.description|default:"N/A" }}</td>
+                                            <td>{{ event.arranged_by }}</td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p>No events available.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const sidebarToggle = document.getElementById('sidebarToggle');
+    const sidebar = document.getElementById('sidebar');
+    const mainContent = document.getElementById('mainContent');
+
+    sidebarToggle.addEventListener('click', function () {
+        sidebar.classList.toggle('active');
+        mainContent.classList.toggle('shifted');
+    });
+});
+</script>
+{% endblock %}
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends 'main_app/base.html' %}
+
+{% block content %}
+<style>
+    .analytics-sidebar {
+        background-color: #f8f9fa;
+        min-height: 100vh;
+        padding-top: 20px;
+        border-right: 1px solid #ccc;
+    }
+    .analytics-sidebar .nav-link {
+        padding: 10px 20px;
+        color: #fff;
+        background-color: #0d47a1;
+        margin-bottom: 10px;
+        border-radius: 4px;
+        font-weight: 500;
+        transition: background-color 0.2s ease;
+    }
+    .analytics-sidebar .nav-link:hover {
+        background-color: #08855d;
+        color: white;
+        text-decoration: none;
+    }
+    .analytics-sidebar .nav-link.active {
+        background-color: #1565d0;
+        font-weight: bold;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="row">
+        <!-- Sidebar -->
+        <div class="col-md-2 analytics-sidebar">
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.path == '/statistics/' %}active{% endif %}" href="{% url 'statistics' %}">
+                        <i class="fas fa-chart-pie me-2"></i> Statistics
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.path == '/analytics/' %}active{% endif %}" href="{% url 'analytics' %}">
+                        <i class="fas fa-chart-line me-2"></i> Analysis
+                    </a>
+                </li>
+
+                <li class="nav-item">
+                    <a href="{% url 'dashboard' %}" class="btn btn-secondary mt-3">Back</a>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="col-md-10 py-4">
+            {% block analytics_content %}{% endblock %}
+        </div>
+    </div>
+</div>
+{% endblock %}

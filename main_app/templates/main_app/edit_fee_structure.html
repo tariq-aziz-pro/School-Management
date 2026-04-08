@@ -1,0 +1,16 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+{% block title %}Edit Fee Structure{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h3>Edit Fee Structure for {{ fee_structure.class_name }}</h3>
+
+    <form method="post">
+        {% csrf_token %}
+        {{ form|crispy }}
+        <button type="submit" class="btn btn-success">Save Changes</button>
+        <a href="{% url 'add_fee_structure' %}" class="btn btn-secondary">Back</a>
+    </form>
+</div>
+{% endblock %}
