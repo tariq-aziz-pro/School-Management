@@ -1,5 +1,5 @@
 from django.contrib.auth.models import AbstractUser
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 from django.contrib.auth import get_user_model
 from decimal import Decimal
@@ -26,6 +26,22 @@ CLASS_CHOICES = [
     ("Class 9", "Class 9"),
     ("Class 10", "Class 10"),
 ]
+
+CLASS_PROGRESSION = {
+    'PG': 'Nursery',
+    'Nursery': 'KG',
+    'KG': 'Class 1',
+    'Class 1': 'Class 2',
+    'Class 2': 'Class 3',
+    'Class 3': 'Class 4',
+    'Class 4': 'Class 5',
+    'Class 5': 'Class 6',
+    'Class 6': 'Class 7',
+    'Class 7': 'Class 8',
+    'Class 8': 'Class 9',
+    'Class 9': 'Class 10',
+    'Class 10': 'Class 10',  # top class stays
+}
 
 SECTION_CHOICES = [
     ('A_Red', 'A Red'),
@@ -143,7 +159,7 @@ class AcademicSession(models.Model):
             raise ValidationError("This session overlaps with an existing session for this school.")
 
     def save(self, *args, **kwargs):
-        self.clean()
+        
         if not self.pk:
             AcademicSession.objects.filter(school=self.school, is_active=True).update(is_active=False)
             self.is_active = True
@@ -186,15 +202,21 @@ class Student(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.student_id:
-            # Use school ID or a unique school identifier for prefix
-            school_prefix = f"{self.school.id}"  # e.g., '1' for school with id=1
-            last_student = Student.objects.filter(school=self.school).order_by('created_at').last()
-            if last_student:
-                # Extract the numeric part after the prefix
-                last_id = int(last_student.student_id.split('-')[-1])
-                self.student_id = f"SCH{school_prefix}-{last_id + 1:04d}"  # e.g., SCH1-0002
-            else:
-                self.student_id = f"SCH{school_prefix}-0001"  # e.g., SCH1-0001
+            with transaction.atomic():
+                # Lock the last student row so no concurrent save can read it
+                last_student = (
+                    Student.objects
+                    .select_for_update()  # ✅ locks the row
+                    .filter(school=self.school)
+                    .order_by('created_at')
+                    .last()
+                )
+                school_prefix = self.school.id
+                if last_student:
+                    last_id = int(last_student.student_id.split('-')[-1])
+                    self.student_id = f"SCH{school_prefix}-{last_id + 1:04d}"
+                else:
+                    self.student_id = f"SCH{school_prefix}-0001"
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -285,38 +307,46 @@ class StudentResult(models.Model):
         ('November', 'November'),
         ('December', 'December'),
     ]
-    student_admission = models.ForeignKey(StudentAdmission, on_delete=models.CASCADE, related_name='results')
+    student_admission = models.ForeignKey(
+        StudentAdmission,
+        on_delete=models.CASCADE,
+        related_name='results'
+    )
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
     exam_type = models.CharField(max_length=20, choices=EXAM_TYPE_CHOICES)
     theory = models.FloatField(default=0.0)
     practical = models.FloatField(default=0.0)
     total_marks = models.FloatField()
     obtained_marks = models.FloatField()
-    percentage = models.FloatField(editable=False)
-    grade = models.CharField(max_length=2, editable=False)
+    # ✅ percentage and grade removed as stored DB fields
+
+    @property
+    def percentage(self):
+        if self.total_marks and self.total_marks > 0:
+            return (self.obtained_marks / self.total_marks) * 100
+        return 0.0
+
+    @property
+    def grade(self):
+        p = self.percentage
+        if p >= 90:
+            return 'A+'
+        elif p >= 80:
+            return 'A'
+        elif p >= 70:
+            return 'B'
+        elif p >= 60:
+            return 'C'
+        elif p >= 50:
+            return 'D'
+        else:
+            return 'F'
 
     def save(self, *args, **kwargs):
-        # Calculate total_marks from theory + practical if either is non-zero
+        # ✅ Only derive total_marks from theory + practical
+        # percentage and grade are now computed on the fly — no need to store them
         if self.theory > 0 or self.practical > 0:
             self.total_marks = self.theory + self.practical
-        # Calculate percentage
-        if self.total_marks > 0:
-            self.percentage = (self.obtained_marks / self.total_marks) * 100
-        else:
-            self.percentage = 0.0
-        # Calculate grade
-        if self.percentage >= 90:
-            self.grade = 'A+'
-        elif self.percentage >= 80:
-            self.grade = 'A'
-        elif self.percentage >= 70:
-            self.grade = 'B'
-        elif self.percentage >= 60:
-            self.grade = 'C'
-        elif self.percentage >= 50:
-            self.grade = 'D'
-        else:
-            self.grade = 'F'
         super().save(*args, **kwargs)
 
     def __str__(self):
@@ -343,14 +373,23 @@ class MonthlyFee(models.Model):
             models.Index(fields=['student_admission', 'month', 'year']),
         ]
 
-    def save(self, *args, **kwargs):
+    def clean(self):
+        # ✅ Validation belongs here
+        if not self.student_admission_id:
+            raise ValidationError("Student admission is required.")
         try:
-            active_session = AcademicSession.objects.get(is_active=True, school=self.student_admission.student.school)
+            active_session = AcademicSession.objects.get(
+                is_active=True,
+                school=self.student_admission.student.school
+            )
             self.year = int(active_session.session_name.split('-')[0])
         except AcademicSession.DoesNotExist:
             raise ValidationError("No active session is available.")
 
-        # Set previous_balance to current_balance of previous month
+
+
+    def save(self, *args, **kwargs):
+        # ✅ No ValidationError raised here — only data logic
         if not self.pk:
             month_index = datetime.datetime.strptime(self.month, '%B').month
             prev_month_num = (month_index - 2) % 12 + 1
@@ -361,20 +400,29 @@ class MonthlyFee(models.Model):
                 month=prev_month,
                 year=prev_year
             ).first()
-            self.previous_balance = prev_fee.current_balance if prev_fee else (self.student_admission.balance or Decimal('0.00'))
+            self.previous_balance = (
+                prev_fee.current_balance if prev_fee
+                else (self.student_admission.balance or Decimal('0.00'))
+            )
 
-        # Calculate fees
         if self.monthly_fee == Decimal('0.00'):
-            tuition_fee = Decimal(str(self.student_admission.tuition_fee)) if self.student_admission.tuition_fee else Decimal('0.00')
-            discount = Decimal(str(self.student_admission.discount)) if self.student_admission.discount else Decimal('0.00')
-            self.monthly_fee = tuition_fee - discount
+            tuition = Decimal(str(self.student_admission.tuition_fee or 0))
+            discount = Decimal(str(self.student_admission.discount or 0))
+            self.monthly_fee = tuition - discount
+
         if self.transport_fee == Decimal('0.00'):
-            self.transport_fee = Decimal(str(self.student_admission.transport_fee)) if self.student_admission.transport == 'Paid' and self.student_admission.transport_fee else Decimal('0.00')
+            self.transport_fee = (
+                Decimal(str(self.student_admission.transport_fee))
+                if self.student_admission.transport == 'Paid' and self.student_admission.transport_fee
+                else Decimal('0.00')
+            )
+
         if self.total_dues == Decimal('0.00'):
             self.total_dues = self.previous_balance + self.monthly_fee + self.transport_fee
+
         received = Decimal(str(self.received)) if self.received is not None else Decimal('0.00')
         self.current_balance = self.total_dues - received
-        self.has_payment = received > Decimal('0.00') or self.has_payment  # Mark as having payment if received > 0
+        self.has_payment = received > Decimal('0.00') or self.has_payment
         super().save(*args, **kwargs)
 
     def __str__(self):

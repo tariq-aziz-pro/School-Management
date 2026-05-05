@@ -10,7 +10,7 @@ from django.template.loader import render_to_string
 from django.conf import settings
 from .forms import SchoolRegisterForm, AcademicSessionForm, FeeStructureForm, StudentAdmissionForm, MonthlyFeeForm, PromoteOfflineStudentForm, PromoteExistingStudentForm, MarkNotPromotedForm, EditStudentForm, RollNumberPromptForm, SchoolSubscriptionForm, TeacherForm, StudentResultForm, SubjectForm, StudentUserForm, SyllabusForm, StaffForm, AssetsForm,ExpensesForm, TransportForm, EventsForm, AnalyticsForm
 
-from .models import CustomUser, AcademicSession, FeeStructure, CLASS_CHOICES, SECTION_CHOICES, StudentAdmission, MonthlyFee, Student, School, SchoolSubscription, StudentResult, Subject, Teacher, TemporaryPassword, Syllabus, Announcement, Staff, Assets, Expenses, Transport, Events
+from .models import CustomUser, AcademicSession, FeeStructure, CLASS_CHOICES, SECTION_CHOICES, StudentAdmission, MonthlyFee, Student, School, SchoolSubscription, StudentResult, Subject, Teacher, TemporaryPassword, Syllabus, Announcement, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
 import uuid
 import os
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -47,7 +47,9 @@ from django.http import JsonResponse
 import pandas as pd
 import io
 from openpyxl import Workbook
-from zipfile import ZipFile
+from io import BytesIO, StringIO
+from zipfile import ZipFile, ZIP_DEFLATED
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +119,146 @@ def custom_login(request):
         form = AuthenticationForm()
     return render(request, 'main_app/login.html', {'form': form})
 
+# Put this near the top of views.py, with other helpers like is_admin()
+def get_active_session(request):
+    """
+    Returns the active AcademicSession for the current user's school.
+    Cached per request to avoid repeated database queries.
+    """
+    if not hasattr(request, '_active_session'):
+        if request.user.is_authenticated and hasattr(request.user, 'school') and request.user.school:
+            request._active_session = AcademicSession.objects.filter(
+                school=request.user.school,
+                is_active=True
+            ).first()
+        else:
+            request._active_session = None
+    return request._active_session
 
-@login_required
+
+def admin_required(view_func):
+    """Only Admin (user_type == 1) can access"""
+    @login_required(login_url='login')
+    @user_passes_test(is_admin, login_url='dashboard')
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+
+def teacher_required(view_func):
+    """Only Teacher (user_type == 4) can access"""
+    @login_required(login_url='login')
+    @user_passes_test(is_teacher, login_url='dashboard')
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+
+def student_required(view_func):
+    """Only Student (user_type == 5) can access"""
+    @login_required(login_url='login')
+    @user_passes_test(is_student, login_url='dashboard')
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+def admin_or_teacher_required(view_func):
+    """Allow both Admin (1) and Teacher (4)"""
+    @login_required(login_url='login')
+    @user_passes_test(lambda user: is_admin(user) or is_teacher(user), 
+                      login_url='dashboard')
+    @wraps(view_func)
+    def _wrapped_view(request, *args, **kwargs):
+        return view_func(request, *args, **kwargs)
+    return _wrapped_view
+
+def get_previous_balance(student_admission, active_session):
+    """Get carried forward balance from the last month of previous session."""
+    previous_session = AcademicSession.objects.filter(
+        school=student_admission.student.school,
+        is_active=False,
+        end_date__lt=active_session.start_date
+    ).order_by('-end_date').first()
+
+    if not previous_session:
+        return Decimal('0.00')
+
+    last_month = previous_session.end_date.strftime('%B')
+    last_year = previous_session.end_date.year
+
+    # Try exact last month first
+    last_fee = MonthlyFee.objects.filter(
+        student_admission=student_admission,
+        month=last_month,
+        year=last_year
+    ).order_by('-id').first()
+
+    if not last_fee:
+        # Fallback to most recent fee in previous session
+        last_fee = MonthlyFee.objects.filter(
+            student_admission=student_admission,
+            student_admission__academic_session=previous_session
+        ).order_by('-year', '-id').first()
+
+    return last_fee.current_balance if last_fee else Decimal('0.00')
+
+
+def create_repeated_admission(student_admission, active_session, roll_number, operator):
+    """Create a new admission for a student who is repeating the class (Not Promoted)."""
+    previous_balance = get_previous_balance(student_admission, active_session)
+
+    # Calculate total dues
+    fee_total = (
+        student_admission.tuition_fee +
+        student_admission.exam_fee +
+        student_admission.book_fee +
+        student_admission.uniform_fee +
+        (student_admission.other_fee or Decimal('0.00')) +
+        student_admission.promotion_fee +
+        (student_admission.transport_fee or Decimal('0.00')) -
+        (student_admission.discount or Decimal('0.00'))
+    )
+
+    total_dues = previous_balance + fee_total
+
+    return StudentAdmission(
+        student=student_admission.student,
+        academic_session=active_session,
+        class_name=student_admission.class_name,
+        roll_number=roll_number,
+        section=student_admission.section,
+        admission_date=datetime.date.today(),
+        class_teacher=student_admission.class_teacher,
+        admission_fee=Decimal('0.00'),
+        tuition_fee=student_admission.tuition_fee,
+        exam_fee=student_admission.exam_fee,
+        book_fee=student_admission.book_fee,
+        uniform_fee=student_admission.uniform_fee,
+        other_fee=student_admission.other_fee or Decimal('0.00'),
+        promotion_fee=student_admission.promotion_fee,
+        transport=student_admission.transport,
+        vehicle_no=student_admission.vehicle_no,
+        route=student_admission.route,
+        driver_contact=student_admission.driver_contact,
+        transport_fee=student_admission.transport_fee or Decimal('0.00'),
+        discount=student_admission.discount or Decimal('0.00'),
+        discount_behalf=student_admission.discount_behalf,
+        total_dues=total_dues,
+        received=Decimal('0.00'),
+        balance=total_dues,
+        status=True,
+        promoted=True,
+        failed_to_promote=True,
+        operator=operator
+    )
+
+
+
+@admin_required
 def student_user_create(request):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can create student accounts.")
-        return redirect('dashboard')
     
     if request.method == 'POST':
         form = StudentUserForm(request.POST, school=request.user.school)
@@ -131,7 +267,7 @@ def student_user_create(request):
                 # Verify StudentAdmission exists for active session
                 student_id = form.cleaned_data['student_id']
                 student = Student.objects.get(student_id=student_id, school=request.user.school)
-                active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+                active_session = get_active_session(request)
                 if not active_session:
                     messages.error(request, "No active academic session found. Please create one.")
                     logger.error(f"No active AcademicSession for school: {request.user.school}")
@@ -143,8 +279,8 @@ def student_user_create(request):
                     return redirect('student_user_create')
                 
                 user, plain_password = form.save()
-                messages.success(request, f"Student account for {user.username} created successfully. Password: {plain_password}")
-                logger.info(f"Student account created by admin {request.user.username}: Username={user.username}, Password={plain_password}")
+                messages.success(request, f"Student account for {user.username} created successfully. Temporary password: {plain_password} — please note it down now.")
+                logger.info(f"Student account created by admin {request.user.username}: Username={user.username}")
                 return redirect('student_list')
             except Exception as e:
                 messages.error(request, f"Error creating student account: {str(e)}")
@@ -157,33 +293,44 @@ def student_user_create(request):
     
     return render(request, 'main_app/student_user_create.html', {'form': form})
 
-@login_required
+@admin_required
 def student_list(request):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can access student records.")
-        return redirect('dashboard')
-    
-    students = Student.objects.filter(school=request.user.school)
-    class_filter = request.GET.get('class_assigned')
-    section_filter = request.GET.get('section')
-    student_id_filter = request.GET.get('student_id')
 
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
-    admissions = StudentAdmission.objects.filter(student__school=request.user.school)
+    active_session = get_active_session(request)
+
+    # Base queryset with optimizations
+    admissions = StudentAdmission.objects.filter(
+        student__school=request.user.school
+    ).select_related('student')   # Important: reduces queries for student data
+
     if active_session:
         admissions = admissions.filter(academic_session=active_session)
-    
-    if class_filter:
+
+    # Apply filters
+    if class_filter := request.GET.get('class_assigned'):
         admissions = admissions.filter(class_name=class_filter)
-    if section_filter:
+    if section_filter := request.GET.get('section'):
         admissions = admissions.filter(section=section_filter)
-    if student_id_filter:
+    if student_id_filter := request.GET.get('student_id'):
         admissions = admissions.filter(student__student_id__icontains=student_id_filter)
 
+    # === BULK FETCHING TO AVOID N+2 QUERIES ===
+    student_ids = list(admissions.values_list('student__student_id', flat=True))
+
+    # Fetch all users + their temporary passwords in just 2 queries
+    users = CustomUser.objects.filter(
+        username__in=student_ids
+    ).select_related('temporary_password')   # Use select_related, not prefetch_related
+
+    # Create lookup dictionary
+    user_map = {user.username: user for user in users}
+
+    # Build student data with zero extra queries inside the loop
     student_data = []
     for admission in admissions:
-        user = CustomUser.objects.filter(username=admission.student.student_id).first()
-        temp_password = TemporaryPassword.objects.filter(user=user).first() if user else None
+        user = user_map.get(admission.student.student_id)
+        temp_password = user.temporary_password if user and hasattr(user, 'temporary_password') else None
+
         student_data.append({
             'student_id': admission.student.student_id,
             'class_assigned': admission.class_name,
@@ -195,17 +342,17 @@ def student_list(request):
 
     context = {
         'student_data': student_data,
-        'classes': StudentAdmission.objects.filter(student__school=request.user.school).values_list('class_name', flat=True).distinct(),
-        'sections': StudentAdmission.objects.filter(student__school=request.user.school).values_list('section', flat=True).distinct(),
+        'classes': StudentAdmission.objects.filter(student__school=request.user.school)
+                        .values_list('class_name', flat=True).distinct(),
+        'sections': StudentAdmission.objects.filter(student__school=request.user.school)
+                        .values_list('section', flat=True).distinct(),
         'active_session': active_session,
     }
+
     return render(request, 'main_app/student_list.html', context)
 
-@login_required
+@student_required
 def student_dashboard(request):
-    if not is_student(request.user):
-        messages.error(request, "Only students can access this dashboard.")
-        return redirect('index')
     
     try:
         student = Student.objects.get(student_id=request.user.username)
@@ -214,7 +361,7 @@ def student_dashboard(request):
         logger.error(f"No Student found for username: {request.user.username}")
         return render(request, 'main_app/student_dashboard.html', {'results': [], 'fees': [], 'syllabus': [], 'announcements': []})
 
-    active_session = AcademicSession.objects.filter(is_active=True, school=student.school).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active academic session found for your school.")
         logger.error(f"No active AcademicSession for school: {student.school}")
@@ -311,45 +458,6 @@ def student_dashboard(request):
 
 
 
-@login_required
-def generate_results_pdf(request):
-    if not is_student(request.user):
-        messages.error(request, "Only students can access this feature.")
-        return redirect('index')
-
-    try:
-        student = Student.objects.get(student_id=request.user.username)
-    except Student.DoesNotExist:
-        return HttpResponse("Student not found.", content_type='text/plain')
-
-    active_session = AcademicSession.objects.filter(is_active=True, school=student.school).first()
-    if not active_session:
-        return HttpResponse("No active session.", content_type='text/plain')
-
-    admission = StudentAdmission.objects.filter(student=student, academic_session=active_session).first()
-    if not admission:
-        return HttpResponse("No admission record found.", content_type='text/plain')
-
-    results = StudentResult.objects.filter(student_admission=admission)
-
-    # Handle filters safely
-    exam_type_filter = request.GET.get('exam_type')
-    subject_filter = request.GET.get('subject')
-
-    if exam_type_filter:
-        results = results.filter(exam_type=exam_type_filter)
-
-    if subject_filter and subject_filter.isdigit():
-        results = results.filter(subject__id=int(subject_filter))
-
-    # 🧪 Just for testing output
-    return HttpResponse(f"{results.count()} results found.", content_type='text/plain')
-
-    # Later, you’ll implement actual PDF generation here
-
-
-    
-
 @user_passes_test(is_developer)
 def developer_dashboard(request):
     schools = School.objects.all().select_related('admin_user').prefetch_related('subscriptions')
@@ -431,137 +539,107 @@ def add_payment(request, school_id):
     return render(request, 'main_app/add_payment.html', {'school': school, 'form': form})
 
 def register_school(request):
-    logger.debug(f"Register school attempt: Method={request.method}, POST={request.POST}")
-
     if request.method == 'POST':
         form = SchoolRegisterForm(request.POST, request.FILES)
-
         if form.is_valid():
             try:
-                # Create admin user (school owner)
-                user = form.save(commit=False)
-                user.is_active = True  # ✅ No email verification
-                user.save()
-
-                # Create and link school
-                school = School.objects.create(
-                    school_name=form.cleaned_data['school_name'],
-                    city=form.cleaned_data['city'],
-                    owner_name=form.cleaned_data['owner_name'],
-                    contact_number=form.cleaned_data['contact_number'],
-                    admin_user=user,
-                    is_active=True  # ✅ Active by default, developer can toggle later
-                )
-
-                # Link user to school
-                user.school = school
-                user.save()
-
-                # Auto-login after registration
+                user = form.save()  # ← form handles everything now
                 login(request, user)
-                messages.success(request, f"School '{school.school_name}' registered successfully and activated.")
-                logger.info(f"School registered: Username={user.username}, School={school.school_name}")
-
+                messages.success(request, f"School '{user.school.school_name}' registered successfully.")
+                logger.info(f"School registered: Username={user.username}, School={user.school.school_name}")
                 return redirect('dashboard')
-
             except Exception as e:
                 messages.error(request, f"Failed to register school: {str(e)}")
                 logger.error(f"Registration error: {str(e)}")
-
         else:
             messages.error(request, 'Please correct the errors below.')
             logger.debug(f"Form errors: {form.errors}")
-
     else:
         form = SchoolRegisterForm()
-
     return render(request, 'main_app/register.html', {'form': form})
 
 
 
 
 
-@login_required
+@admin_required
 def dashboard(request):
-    logger.debug(f"Dashboard access: User={request.user.username}, Superuser={request.user.is_superuser}, UserType={request.user.user_type}, School={request.user.school.school_name if request.user.school else 'None'}")
     if request.user.is_superuser:
         return redirect('developer_dashboard')
-    if request.user.user_type != 1 or not request.user.school:
-        messages.error(request, "Access denied. Admins only.")
-        return redirect('login')
-    session_exists = AcademicSession.objects.filter(school=request.user.school).exists()
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+
+    active_session = get_active_session(request)
     context = {
-        'session_exists': session_exists,
+        'session_exists': AcademicSession.objects.filter(school=request.user.school).exists(),
         'active_session': active_session,
     }
+
     if active_session:
-        total_students = StudentAdmission.objects.filter(
+        base_qs = StudentAdmission.objects.filter(
             academic_session=active_session,
             student__school=request.user.school,
             status=True
-        ).count()
-        new_admissions = StudentAdmission.objects.filter(
-            academic_session=active_session,
-            student__school=request.user.school,
-            promoted=False,
-            status=True
-        ).count()
-        promoted_students = StudentAdmission.objects.filter(
-            academic_session=active_session,
-            student__school=request.user.school,
-            promoted=True,
-            status=True
-        ).count()
-        total_classes = StudentAdmission.objects.filter(
-            academic_session=active_session,
-            student__school=request.user.school,
-            status=True
-        ).values('class_name').distinct().count()
-        total_sections = StudentAdmission.objects.filter(
-            academic_session=active_session,
-            student__school=request.user.school,
-            status=True
-        ).values('section').distinct().count()
+        )
+
+        # Main statistics
+        stats = base_qs.aggregate(
+            total_students=Count('id'),
+            new_admissions=Count('id', filter=Q(promoted=False)),
+            promoted_students=Count('id', filter=Q(promoted=True)),
+            total_classes=Count('class_name', distinct=True),
+            total_sections=Count('section', distinct=True),
+        )
+
+        # Total Balance - Separate query (this was causing the error)
+        balance_result = MonthlyFee.objects.filter(
+            student_admission__academic_session=active_session,
+            student_admission__student__school=request.user.school,
+        ).aggregate(total=Sum('current_balance'))
+
+        total_balance = balance_result['total'] or 0
+
+        # Search functionality
         search_results = []
         search_type = request.GET.get('search_type', request.session.get('search_type', ''))
         search_value = request.GET.get('search_value', request.session.get('search_value', '')).strip().lower()
+
         if request.GET.get('clear_search'):
             request.session.pop('search_type', None)
             request.session.pop('search_value', None)
             search_type = ''
             search_value = ''
+
         if search_type and search_value:
-            queryset = StudentAdmission.objects.filter(
-                academic_session=active_session,
-                student__school=request.user.school,
-                status=True
-            )
+            queryset = base_qs
             if search_type == 'student_id':
                 search_results = queryset.filter(student__student_id__iexact=search_value)
             elif search_type == 'contact':
                 search_results = queryset.filter(student__contact__iexact=search_value)
             elif search_type == 'father_name':
                 search_results = queryset.filter(student__father_guardian_name__iexact=search_value)
+
             if not search_results:
                 messages.warning(request, "No results found.")
+
             request.session['search_type'] = search_type
             request.session['search_value'] = search_value
+
         context.update({
-            'total_students': total_students,
-            'new_admissions': new_admissions,
-            'promoted_students': promoted_students,
-            'total_classes': total_classes,
-            'total_sections': total_sections,
+            'total_students': stats['total_students'],
+            'new_admissions': stats['new_admissions'],
+            'promoted_students': stats['promoted_students'],
+            'total_classes': stats['total_classes'],
+            'total_sections': stats['total_sections'],
+            'total_balance': total_balance,          # ← Fixed
             'search_results': search_results,
             'search_type': search_type,
             'search_value': search_value,
         })
+
     return render(request, 'main_app/dashboard.html', context)
 
-@login_required
+@admin_required
 def edit_student(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -587,7 +665,7 @@ def edit_student(request, student_id):
     })
 
 
-@login_required
+@admin_required
 @user_passes_test(is_admin)
 def create_academic_session(request):
     logger.debug(f"Create session: User={request.user}, Superuser={request.user.is_superuser}, UserType={request.user.user_type}, School={request.user.school}")
@@ -613,10 +691,10 @@ def create_academic_session(request):
     return render(request, 'main_app/create_session.html', {'form': form})
 
 
-@login_required
+@admin_required
 def search_session(request):
     user = request.user
-
+    
     # Ensure the logged-in user has a school
     if not hasattr(user, 'school') or not user.school:
         logger.error(f"User {user} has no associated school.")
@@ -627,79 +705,76 @@ def search_session(request):
 
     # Get all sessions for the school
     sessions = AcademicSession.objects.filter(school=school).order_by('-start_date')
+
+    if not sessions.exists():
+        logger.error(f"No sessions found for {school}.")
+        return render(request, 'main_app/search_session.html', {
+            'message': 'No academic sessions found for this school.'
+        })
+
+    # === Queries that run ONLY ONCE (outside the loop) ===
+    teacher_salaries = Teacher.objects.filter(school=school).aggregate(
+        total=Sum('salary')
+    )['total'] or 0
+
+    staff_salaries = Staff.objects.filter(school=school).aggregate(
+        total=Sum('salary')
+    )['total'] or 0
+
     session_data = []
 
     for session in sessions:
-        # Get session dates
         start_date = session.start_date
         end_date = session.end_date
 
-        # New admissions in this session
-        student_count = StudentAdmission.objects.filter(
+        # Combined student statistics
+        student_stats = StudentAdmission.objects.filter(
             academic_session=session,
             student__school=school
-        ).count()
+        ).aggregate(
+            total_students=Count('id'),
+            total_classes=Count('class_name', distinct=True),
+        )
 
-        # Students by class
+        # Students by class breakdown (needed for template display)
         students_by_class = StudentAdmission.objects.filter(
             academic_session=session,
             student__school=school
         ).values('class_name').annotate(count=Count('id')).order_by('class_name')
 
-        # Total fee collected in session
-        total_fee = MonthlyFee.objects.filter(
-            payment_date__range=(start_date, end_date),
+        # Fee collected in this session
+        fee_stats = MonthlyFee.objects.filter(
+            student_admission__academic_session=session,
             student_admission__student__school=school
-        ).aggregate(total=Sum('received'))['total'] or 0
+        ).aggregate(
+            total_fee=Sum('received'),
+            total_balance=Sum('current_balance')
+        )
 
-        # Total student balance
-        total_balance = StudentAdmission.objects.filter(
-            academic_session=session,
-            student__school=school
-        ).aggregate(balance=Sum('balance'))['balance'] or 0
-
-        # Total teacher salaries
-        teacher_salaries = Teacher.objects.filter(
-            school=school
-        ).aggregate(total=Sum('salary'))['total'] or 0
-
-        # Total staff salaries
-        staff_salaries = Staff.objects.filter(
-            school=school
-        ).aggregate(total=Sum('salary'))['total'] or 0
-
-        # Total expenses in session
+        # Expenses in this session
         total_expenses = Expenses.objects.filter(
             school=school,
             payment_date__range=(start_date, end_date)
         ).aggregate(total=Sum('price'))['total'] or 0
 
-        # Append session data
         session_data.append({
             'session': session,
-            'student_count': student_count,
+            'student_count': student_stats['total_students'],
             'students_by_class': students_by_class,
-            'total_fee': total_fee,
-            'total_balance': total_balance,
+            'total_fee': fee_stats['total_fee'] or 0,
+            'total_balance': fee_stats['total_balance'] or 0,
             'teacher_salaries': teacher_salaries,
             'staff_salaries': staff_salaries,
             'total_expenses': total_expenses,
-        })
-
-    if not session_data:
-        logger.error(f"No sessions found for {school}.")
-        return render(request, 'main_app/search_session.html', {
-            'message': 'No academic sessions found for this school.'
         })
 
     return render(request, 'main_app/search_session.html', {
         'session_data': session_data
     })
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def add_fee_structure(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found. Please create an active session first.")
         return redirect('dashboard')
@@ -724,8 +799,7 @@ def add_fee_structure(request):
         'active_session': active_session,
     })
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def edit_fee_structure(request, fee_id):
     fee_structure = get_object_or_404(FeeStructure, id=fee_id, academic_session__school=request.user.school)
     if request.method == 'POST':
@@ -749,11 +823,9 @@ def index(request):
 # import uuid, os
 # from django.conf import settings
 
-@login_required
+@admin_required
 def student_admission(request):
-    active_session = AcademicSession.objects.filter(
-        school=request.user.school, is_active=True
-    ).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found. Please create an active session first.")
         return redirect('dashboard')
@@ -856,9 +928,9 @@ def student_admission(request):
         'operator_name': request.user.username, 'image_preview_url': image_preview_url,
     })
 
-@login_required
+@admin_required
 def admission_success(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -866,9 +938,9 @@ def admission_success(request, student_id):
     admission = get_object_or_404(StudentAdmission, student=student, academic_session=active_session)
     return render(request, 'main_app/admission_success.html', {'student': student, 'admission': admission})
 
-@login_required
+@admin_required
 def generate_pdf(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -960,6 +1032,7 @@ def generate_pdf(request, student_id):
     response.write(pdf)
     return response
 
+@admin_required
 def get_fee_structure(request):
     class_name = request.GET.get('class_name')
     try:
@@ -984,6 +1057,7 @@ def get_fee_structure(request):
         }
     return JsonResponse(data)
 
+@admin_required
 def get_transport_details(request):
     option = request.GET.get('transport_option')
     if option == 'Paid':
@@ -994,9 +1068,9 @@ def get_transport_details(request):
         data = {'transport_fee': 0, 'note': 'No transport selected'}
     return JsonResponse(data)
 
-@login_required
+@admin_required
 def list_admissions(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1008,9 +1082,9 @@ def list_admissions(request):
         'admissions': admissions,
     })
 
-@login_required
+@admin_required
 def monthly_fee(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1042,9 +1116,9 @@ def monthly_fee(request):
         'search_type': request.GET.get('search_type', 'student_id'),
     })
 
-@login_required
+@admin_required
 def monthly_fee_detail(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         logger.error("No active session found for user: %s", request.user)
@@ -1177,13 +1251,13 @@ def monthly_fee_detail(request, student_id):
         'active_session': active_session,
     })
 
-@login_required
+@admin_required
 def monthly_fee_success(request, monthly_fee_id):
     monthly_fee = get_object_or_404(MonthlyFee, id=monthly_fee_id, student_admission__student__school=request.user.school)
     messages.success(request, f"Payment for {monthly_fee.month} {monthly_fee.year} was successfully saved!")
     return render(request, 'main_app/monthly_fee_success.html', {'monthly_fee': monthly_fee})
 
-@login_required
+@admin_required
 def monthly_fee_pdf(request, monthly_fee_id):
     monthly_fee = get_object_or_404(MonthlyFee, id=monthly_fee_id, student_admission__student__school=request.user.school)
     student_admission = monthly_fee.student_admission
@@ -1261,10 +1335,9 @@ def monthly_fee_pdf(request, monthly_fee_id):
     response.write(pdf)
     return response
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_offline_student(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found. Please create an active session first.")
         return redirect('dashboard')
@@ -1316,10 +1389,9 @@ def promote_offline_student(request):
     }
     return render(request, 'main_app/promote_offline_student.html', context)
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_offline_preview(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found. Please create an active session first.")
         return redirect('dashboard')
@@ -1414,10 +1486,9 @@ def promote_offline_preview(request):
     }
     return render(request, 'main_app/promote_offline_preview.html', context)
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_offline_success(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1430,10 +1501,9 @@ def promote_offline_success(request, student_id):
     messages.success(request, f"Student {admission.student.first_name} {admission.student.last_name} has been successfully promoted to {admission.class_name}, section {admission.section}.")
     return render(request, 'main_app/promote_offline_success.html', {'student': admission})
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promoted_students_report(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1447,10 +1517,9 @@ def promoted_students_report(request):
         'session': active_session,
     })
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_existing_students(request):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1493,10 +1562,9 @@ def promote_existing_students(request):
         'no_previous': False
     })
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_existing_student(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
@@ -1577,122 +1645,53 @@ def promote_existing_student(request, student_id):
         'active_session': active_session  # Pass active_session for template
     })
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def mark_not_promoted(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
-        return redirect('main_app/promote_existing_students')
+        return redirect('promote_existing_students')
+
     student_admission = get_object_or_404(
         StudentAdmission,
         student__student_id=student_id,
         student__school=request.user.school
     )
+
     if StudentAdmission.objects.filter(
         student=student_admission.student,
         academic_session=active_session
     ).exists():
         messages.error(request, f"Student {student_admission.student.first_name} is already admitted in the current session.")
-        return redirect('main_app/promote_existing_students')
-    filtered_class = request.GET.get('class_name')
-    filtered_section = request.GET.get('section')
+        return redirect('promote_existing_students')
+
     roll_number = student_admission.roll_number
+
+    # Check for roll number conflict
     if StudentAdmission.objects.filter(
         roll_number=roll_number,
         class_name=student_admission.class_name,
         section=student_admission.section,
         academic_session=active_session
     ).exists():
-        return redirect(
-            reverse('roll_number_prompt', kwargs={'student_id': student_id}) +
-            f"?class_name={urlencode({'class_name': filtered_class})}&section={urlencode({'section': filtered_section})}"
-        )
-    previous_balance = Decimal('0.00')
-    previous_session = AcademicSession.objects.filter(
-        school=request.user.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
-    ).order_by('-end_date').first()
-    if previous_session:
-        last_month = previous_session.end_date.strftime('%B')
-        last_year = previous_session.end_date.year
-        last_fee = MonthlyFee.objects.filter(
-            student_admission=student_admission,
-            month=last_month,
-            year=last_year
-        ).order_by('-id').first()
-        if last_fee:
-            previous_balance = last_fee.current_balance
-        else:
-            last_fee = MonthlyFee.objects.filter(
-                student_admission=student_admission,
-                year__lte=last_year
-            ).order_by('-year', '-id').first()
-            if last_fee:
-                previous_balance = last_fee.current_balance
-    new_admission = StudentAdmission(
-        student=student_admission.student,
-        academic_session=active_session,
-        class_name=student_admission.class_name,
-        roll_number=roll_number,
-        section=student_admission.section,
-        admission_date=datetime.date.today(),
-        class_teacher=student_admission.class_teacher,
-        admission_fee=Decimal('0.00'),
-        tuition_fee=student_admission.tuition_fee,
-        exam_fee=student_admission.exam_fee,
-        book_fee=student_admission.book_fee,
-        uniform_fee=student_admission.uniform_fee,
-        other_fee=student_admission.other_fee or Decimal('0.00'),
-        promotion_fee=student_admission.promotion_fee,
-        transport=student_admission.transport,
-        vehicle_no=student_admission.vehicle_no,
-        route=student_admission.route,
-        driver_contact=student_admission.driver_contact,
-        transport_fee=student_admission.transport_fee or Decimal('0.00'),
-        discount=student_admission.discount,
-        discount_behalf=student_admission.discount_behalf,
-        total_dues=previous_balance + (
-            student_admission.tuition_fee +
-            student_admission.exam_fee +
-            student_admission.book_fee +
-            student_admission.uniform_fee +
-            (student_admission.other_fee or Decimal('0.00')) +
-            student_admission.promotion_fee +
-            (student_admission.transport_fee or Decimal('0.00')) -
-            student_admission.discount
-        ),
-        received=Decimal('0.00'),
-        balance=previous_balance + (
-            student_admission.tuition_fee +
-            student_admission.exam_fee +
-            student_admission.book_fee +
-            student_admission.uniform_fee +
-            (student_admission.other_fee or Decimal('0.00')) +
-            student_admission.promotion_fee +
-            (student_admission.transport_fee or Decimal('0.00')) -
-            student_admission.discount
-        ),
-        status=True,
-        promoted=True,
-        failed_to_promote=True,
-        operator=request.user
-    )
+        return redirect('roll_number_prompt', student_id=student_id)
+
     try:
+        new_admission = create_repeated_admission(
+            student_admission, active_session, roll_number, request.user
+        )
         new_admission.save()
+        
         messages.success(request, f"Student {student_admission.student.first_name} marked as not promoted.")
-        base_url = reverse('promote_existing_success', kwargs={'student_id': student_admission.student.student_id})
-        query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
-        return redirect(f"{base_url}?{query_params}")
+        return redirect('promote_existing_success', student_id=student_admission.student.student_id)
+    
     except Exception as e:
         messages.error(request, f"Error creating new admission: {str(e)}")
-        return redirect('main_app/promote_existing_students')
+        return redirect('promote_existing_students')
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def roll_number_prompt(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('main_app/promote_existing_students')
@@ -1718,106 +1717,22 @@ def roll_number_prompt(request, student_id):
         )
         if form.is_valid():
             roll_number = form.cleaned_data['roll_number']
-            previous_balance = Decimal('0.00')
-            previous_session = AcademicSession.objects.filter(
-                school=request.user.school,
-                is_active=False,
-                end_date__lt=active_session.start_date
-            ).order_by('-end_date').first()
-            if previous_session:
-                last_month = previous_session.end_date.strftime('%B')
-                last_year = previous_session.end_date.year
-                last_fee = MonthlyFee.objects.filter(
-                    student_admission=student_admission,
-                    month=last_month,
-                    year=last_year
-                ).order_by('-id').first()
-                if last_fee:
-                    previous_balance = last_fee.current_balance
-                else:
-                    last_fee = MonthlyFee.objects.filter(
-                        student_admission=student_admission,
-                        year__lte=last_year
-                    ).order_by('-year', '-id').first()
-                    if last_fee:
-                        previous_balance = last_fee.current_balance
-            new_admission = StudentAdmission(
-                student=student_admission.student,
-                academic_session=active_session,
-                class_name=student_admission.class_name,
-                roll_number=roll_number,
-                section=student_admission.section,
-                admission_date=datetime.date.today(),
-                class_teacher=student_admission.class_teacher,
-                admission_fee=Decimal('0.00'),
-                tuition_fee=student_admission.tuition_fee,
-                exam_fee=student_admission.exam_fee,
-                book_fee=student_admission.book_fee,
-                uniform_fee=student_admission.uniform_fee,
-                other_fee=student_admission.other_fee or Decimal('0.00'),
-                promotion_fee=student_admission.promotion_fee,
-                transport=student_admission.transport,
-                vehicle_no=student_admission.vehicle_no,
-                route=student_admission.route,
-                driver_contact=student_admission.driver_contact,
-                transport_fee=student_admission.transport_fee or Decimal('0.00'),
-                discount=student_admission.discount,
-                discount_behalf=student_admission.discount_behalf,
-                total_dues=previous_balance + (
-                    student_admission.tuition_fee +
-                    student_admission.exam_fee +
-                    student_admission.book_fee +
-                    student_admission.uniform_fee +
-                    (student_admission.other_fee or Decimal('0.00')) +
-                    student_admission.promotion_fee +
-                    (student_admission.transport_fee or Decimal('0.00')) -
-                    student_admission.discount
-                ),
-                received=Decimal('0.00'),
-                balance=previous_balance + (
-                    student_admission.tuition_fee +
-                    student_admission.exam_fee +
-                    student_admission.book_fee +
-                    student_admission.uniform_fee +
-                    (student_admission.other_fee or Decimal('0.00')) +
-                    student_admission.promotion_fee +
-                    (student_admission.transport_fee or Decimal('0.00')) -
-                    student_admission.discount
-                ),
-                status=True,
-                promoted=True,
-                failed_to_promote=True,
-                operator=request.user
-            )
             try:
+                new_admission = create_repeated_admission(
+                    student_admission, active_session, roll_number, request.user
+                )
                 new_admission.save()
+        
                 messages.success(request, f"Student {student_admission.student.first_name} marked as not promoted.")
-                base_url = reverse('main_app/promote_existing_success', kwargs={'student_id': student_admission.student.student_id})
-                query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
-                return redirect(f"{base_url}?{query_params}")
+                return redirect('promote_existing_success', student_id=student_admission.student.student_id)
+    
             except Exception as e:
                 messages.error(request, f"Error creating new admission: {str(e)}")
-                return redirect('main_app/promote_existing_students')
-    else:
-        form = RollNumberPromptForm(
-            class_name=student_admission.class_name,
-            section=student_admission.section,
-            academic_session=active_session
-        )
-    return render(request, 'main_app/roll_number_prompt.html', {
-        'form': form,
-        'student': student_admission.student,
-        'class_name': student_admission.class_name,
-        'section': student_admission.section,
-        'original_roll_number': student_admission.roll_number,
-        'filtered_class': filtered_class,
-        'filtered_section': filtered_section
-    })
+                return redirect('promote_existing_students')
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def promote_existing_success(request, student_id):
-    active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
@@ -1835,19 +1750,15 @@ def promote_existing_success(request, student_id):
         'section': filtered_section
     })
     
-@login_required
+@admin_required
 def teacher_list(request):
-    if request.user.user_type != 1:  # Restrict to admins
-        messages.error(request, "Only admins can access this page.")
-        return redirect('dashboard')
+    
     teachers = Teacher.objects.filter(school=request.user.school)
     return render(request, 'main_app/teacher_list.html', {'teachers': teachers})
 
-@login_required
+@admin_required
 def teacher_create(request):
-    if request.user.user_type != 1:  # Restrict to admins
-        messages.error(request, "Only admins can create teachers.")
-        return redirect('dashboard')
+    
     if request.method == 'POST':
         form = TeacherForm(request.POST, request=request)
         if form.is_valid():
@@ -1866,7 +1777,7 @@ def teacher_create(request):
         form = TeacherForm(request=request)
     return render(request, 'main_app/teacher_form.html', {'form': form, 'action': 'Create'})
 
-@login_required
+@admin_required
 def teacher_update(request, teacher_id):
     teacher = get_object_or_404(Teacher, id=teacher_id, school=request.user.school)
     if request.method == 'POST':
@@ -1887,7 +1798,7 @@ def teacher_update(request, teacher_id):
         form = TeacherForm(instance=teacher, request=request, initial={'username': teacher.user.username})
     return render(request, 'main_app/teacher_form.html', {'form': form, 'action': 'Update', 'teacher': teacher})
 
-@login_required
+@admin_required
 def teacher_delete(request, teacher_id):
     teacher = get_object_or_404(Teacher, id=teacher_id, school=request.user.school)
     if request.method == 'POST':
@@ -1902,11 +1813,8 @@ def teacher_delete(request, teacher_id):
         return redirect('teacher_list')
     return render(request, 'main_app/teacher_confirm_delete.html', {'teacher': teacher})
 
-@login_required
+@admin_or_teacher_required
 def teacher_dashboard(request):
-    if request.user.user_type != 4:
-        messages.error(request, "Only teachers can access this page.")
-        return redirect('dashboard')
     
     teacher = get_object_or_404(Teacher, user=request.user, school=request.user.school)
     active_session = AcademicSession.objects.filter(school=request.user.school, is_active=True).first()
@@ -1947,12 +1855,13 @@ def teacher_dashboard(request):
 
 
 @login_required
+@user_passes_test(is_teacher, login_url='dashboard')
 def result_create(request):
-    if request.user.user_type != 4:
-        messages.error(request, "Only teachers can create results.")
-        return redirect('dashboard')
-    
-    teacher = get_object_or_404(Teacher, user=request.user, school=request.user.school)
+    teacher = get_object_or_404(
+        Teacher,
+        user=request.user,
+        school=request.user.school
+    )
     if request.method == 'POST':
         form = StudentResultForm(request.POST, teacher=teacher)
         if form.is_valid():
@@ -1969,14 +1878,24 @@ def result_create(request):
         form = StudentResultForm(teacher=teacher)
     return render(request, 'main_app/result_form.html', {'form': form, 'action': 'Add'})
 
+
 @login_required
+@user_passes_test(is_teacher, login_url='dashboard')
 def result_edit(request, result_id):
-    if request.user.user_type != 4:
-        messages.error(request, "Only teachers can edit results.")
-        return redirect('dashboard')
-    
-    teacher = get_object_or_404(Teacher, user=request.user, school=request.user.school)
-    result = get_object_or_404(StudentResult, id=result_id, student_admission__student__school=teacher.school)
+    teacher = get_object_or_404(
+        Teacher,
+        user=request.user,
+        school=request.user.school
+    )
+    # ✅ Scoped to teacher's school + class + section
+    # prevents Teacher A editing Teacher B's results in same school
+    result = get_object_or_404(
+        StudentResult,
+        id=result_id,
+        student_admission__student__school=teacher.school,
+        student_admission__class_name=teacher.class_name,
+        student_admission__section=teacher.section
+    )
     if request.method == 'POST':
         form = StudentResultForm(request.POST, instance=result, teacher=teacher)
         if form.is_valid():
@@ -1992,34 +1911,42 @@ def result_edit(request, result_id):
         form = StudentResultForm(instance=result, teacher=teacher)
     return render(request, 'main_app/result_form.html', {'form': form, 'action': 'Edit'})
 
+
 @login_required
+@user_passes_test(is_teacher, login_url='dashboard')
 def result_delete(request, result_id):
-    if request.user.user_type != 4:
-        messages.error(request, "Only teachers can delete results.")
-        return redirect('dashboard')
-    
-    teacher = get_object_or_404(Teacher, user=request.user, school=request.user.school)
-    result = get_object_or_404(StudentResult, id=result_id, student_admission__student__school=teacher.school)
+    teacher = get_object_or_404(
+        Teacher,
+        user=request.user,
+        school=request.user.school
+    )
+    # ✅ Scoped to teacher's school + class + section
+    result = get_object_or_404(
+        StudentResult,
+        id=result_id,
+        student_admission__student__school=teacher.school,
+        student_admission__class_name=teacher.class_name,
+        student_admission__section=teacher.section
+    )
     if request.method == 'POST':
         result.delete()
         messages.success(request, "Result deleted successfully.")
         return redirect('teacher_dashboard')
-    return render(request, 'main_app/result_confirm_delete.html', {'result': result})
+    return render(
+        request,
+        'main_app/result_confirm_delete.html',
+        {'result': result}
+    )
 
 
-@login_required
+@admin_or_teacher_required
 def subject_list(request):
-    if request.user.user_type != 1:
-        messages.error(request, "Only admins can access this page.")
-        return redirect('dashboard')
     subjects = Subject.objects.filter(school=request.user.school)
     return render(request, 'main_app/subject_list.html', {'subjects': subjects})
 
-@login_required
+@admin_or_teacher_required
 def subject_create(request):
-    if request.user.user_type != 1:
-        messages.error(request, "Only admins can create subjects.")
-        return redirect('dashboard')
+    
     if request.method == 'POST':
         form = SubjectForm(request.POST, request=request)
         if form.is_valid():
@@ -2038,11 +1965,8 @@ def subject_create(request):
     return render(request, 'main_app/subject_form.html', {'form': form, 'action': 'Create'})
 
 
-@login_required
+@admin_or_teacher_required
 def subject_edit(request, subject_id):
-    if request.user.user_type != 1:
-        messages.error(request, "Only admins can edit subjects.")
-        return redirect('dashboard')
 
     subject = get_object_or_404(Subject, id=subject_id, school=request.user.school)
 
@@ -2064,11 +1988,8 @@ def subject_edit(request, subject_id):
 
 
 
-@login_required
+@admin_or_teacher_required
 def subject_delete(request, pk):
-    if request.user.user_type != 1:
-        messages.error(request, "Only admins can delete subjects.")
-        return redirect('dashboard')
     
     subject = get_object_or_404(Subject, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2084,11 +2005,8 @@ def subject_delete(request, pk):
 
 
 
-@login_required
+@admin_or_teacher_required
 def add_syllabus(request):
-    if request.user.user_type not in [1, 4]:  # Admin or Teacher
-        messages.error(request, "Only admins or teachers can add syllabi.")
-        return redirect('dashboard')
 
     if request.method == 'POST':
         form = SyllabusForm(request.POST, request.FILES, user=request.user)
@@ -2113,23 +2031,17 @@ def add_syllabus(request):
     return render(request, 'main_app/add_syllabus.html', {'form': form, 'action': 'Add'})
 
 
-@login_required
+@admin_or_teacher_required
 def syllabus_list(request):
-    if request.user.user_type != 1:  # Only Admin
-        messages.error(request, "Only admins can view the syllabus list.")
-        return redirect('dashboard')
 
     syllabi = Syllabus.objects.filter(school=request.user.school).select_related('subject', 'uploaded_by')
     return render(request, 'main_app/syllabus_list.html', {'syllabus_list': syllabi})
 
 
-@login_required
+@admin_or_teacher_required
 def edit_syllabus(request, syllabus_id):
     syllabus = get_object_or_404(Syllabus, id=syllabus_id, school=request.user.school)
 
-    if request.user.user_type not in [1, 4]:  # Admin or Teacher
-        messages.error(request, "You are not authorized to edit this syllabus.")
-        return redirect('syllabus_list')
 
     if request.method == 'POST':
         form = SyllabusForm(request.POST, request.FILES, instance=syllabus, user=request.user)
@@ -2145,13 +2057,10 @@ def edit_syllabus(request, syllabus_id):
     return render(request, 'main_app/add_syllabus.html', {'form': form, 'action': 'Edit'})
 
 
-@login_required
+@admin_or_teacher_required
 def delete_syllabus(request, syllabus_id):
     syllabus = get_object_or_404(Syllabus, id=syllabus_id, school=request.user.school)
 
-    if request.user.user_type not in [1, 4]:
-        messages.error(request, "You are not authorized to delete this syllabus.")
-        return redirect('syllabus_list')
 
     if request.method == 'POST':
         syllabus.delete()
@@ -2172,7 +2081,7 @@ def calculate_overall_grade(percentage):
     elif percentage >= 50: return 'D'
     else: return 'F'
 
-@login_required
+@admin_or_teacher_required
 def generate_results_pdf(request):
     if not is_student(request.user):
         messages.error(request, "Only students can access this feature.")
@@ -2185,7 +2094,7 @@ def generate_results_pdf(request):
         logger.error(f"No Student found for username: {request.user.username}")
         return redirect('student_dashboard')
 
-    active_session = AcademicSession.objects.filter(is_active=True, school=student.school).first()
+    active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active academic session found.")
         logger.error(f"No active AcademicSession for school: {student.school}")
@@ -2305,7 +2214,7 @@ def generate_results_pdf(request):
 
 
 
-@login_required
+@admin_required
 def staff_list(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2313,7 +2222,7 @@ def staff_list(request):
     staff = Staff.objects.filter(school=request.user.school)
     return render(request, 'main_app/staff_list.html', {'staff': staff})  # Updated path
 
-@login_required
+@admin_required
 def staff_detail(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2321,7 +2230,7 @@ def staff_detail(request, pk):
     staff = get_object_or_404(Staff, pk=pk, school=request.user.school)
     return render(request, 'main_app/staff_detail.html', {'staff': staff})  # Updated path
 
-@login_required
+@admin_required
 def staff_create(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2336,7 +2245,7 @@ def staff_create(request):
         form = StaffForm(user=request.user)
     return render(request, 'main_app/staff_form.html', {'form': form, 'title': 'Add Staff'})  # Updated path
 
-@login_required
+@admin_required
 def staff_update(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2352,7 +2261,7 @@ def staff_update(request, pk):
         form = StaffForm(instance=staff, user=request.user)
     return render(request, 'main_app/staff_form.html', {'form': form, 'title': 'Edit Staff'})  # Updated path
 
-@login_required
+@admin_required
 def staff_delete(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2365,7 +2274,7 @@ def staff_delete(request, pk):
     return render(request, 'main_app/staff_confirm_delete.html', {'staff': staff})
 
 
-@login_required
+@admin_required
 def assets_list(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2376,7 +2285,7 @@ def assets_list(request):
     assets = Assets.objects.filter(school=request.user.school)
     return render(request, 'main_app/assets_list.html', {'assets': assets})
 
-@login_required
+@admin_required
 def assets_detail(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
@@ -2387,13 +2296,12 @@ def assets_detail(request, pk):
     asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
     return render(request, 'main_app/assets_detail.html', {'asset': asset})
 
-@login_required
+@admin_required
 def assets_create(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     if request.method == 'POST':
         form = AssetsForm(request.POST, user=request.user)
@@ -2405,13 +2313,12 @@ def assets_create(request):
         form = AssetsForm(user=request.user)
     return render(request, 'main_app/assets_form.html', {'form': form, 'title': 'Add Asset'})
 
-@login_required
+@admin_required
 def assets_update(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2424,13 +2331,12 @@ def assets_update(request, pk):
         form = AssetsForm(instance=asset, user=request.user)
     return render(request, 'main_app/assets_form.html', {'form': form, 'title': 'Edit Asset'})
 
-@login_required
+@admin_required
 def assets_delete(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2442,35 +2348,32 @@ def assets_delete(request, pk):
 
 
 
-@login_required
+@admin_required
 def expenses_list(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     expenses = Expenses.objects.filter(school=request.user.school)
     return render(request, 'main_app/expenses_list.html', {'expenses': expenses})
 
-@login_required
+@admin_required
 def expenses_detail(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     expense = get_object_or_404(Expenses, pk=pk, school=request.user.school)
     return render(request, 'main_app/expenses_detail.html', {'expense': expense})
 
-@login_required
+@admin_required
 def expenses_create(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     if request.method == 'POST':
         form = ExpensesForm(request.POST, user=request.user)
@@ -2482,13 +2385,12 @@ def expenses_create(request):
         form = ExpensesForm(user=request.user)
     return render(request, 'main_app/expenses_form.html', {'form': form, 'title': 'Add Expense'})
 
-@login_required
+@admin_required
 def expenses_update(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     expense = get_object_or_404(Expenses, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2501,13 +2403,12 @@ def expenses_update(request, pk):
         form = ExpensesForm(instance=expense, user=request.user)
     return render(request, 'main_app/expenses_form.html', {'form': form, 'title': 'Edit Expense'})
 
-@login_required
+@admin_required
 def expenses_delete(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     expense = get_object_or_404(Expenses, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2517,40 +2418,32 @@ def expenses_delete(request, pk):
     return render(request, 'main_app/expenses_confirm_delete.html', {'expense': expense})
 
 
-
-
-
-
-
-@login_required
+@admin_required
 def transport_list(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     transports = Transport.objects.filter(school=request.user.school)
     return render(request, 'main_app/transport_list.html', {'transports': transports})
 
-@login_required
+@admin_required
 def transport_detail(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     transport = get_object_or_404(Transport, pk=pk, school=request.user.school)
     return render(request, 'main_app/transport_detail.html', {'transport': transport})
 
-@login_required
+@admin_required
 def transport_create(request):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     if request.method == 'POST':
         form = TransportForm(request.POST, user=request.user)
@@ -2562,13 +2455,12 @@ def transport_create(request):
         form = TransportForm(user=request.user)
     return render(request, 'main_app/transport_form.html', {'form': form, 'title': 'Add Transport'})
 
-@login_required
+@admin_required
 def transport_update(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     transport = get_object_or_404(Transport, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2581,13 +2473,12 @@ def transport_update(request, pk):
         form = TransportForm(instance=transport, user=request.user)
     return render(request, 'main_app/transport_form.html', {'form': form, 'title': 'Edit Transport'})
 
-@login_required
+@admin_required
 def transport_delete(request, pk):
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     transport = get_object_or_404(Transport, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2601,48 +2492,37 @@ def transport_delete(request, pk):
 
 
 
-
-
-
-
-@login_required
+@admin_required
 def events_list(request):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can access event records.")
-        return redirect('dashboard')
+    
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
         return render(request, 'main_app/no_session.html')
     events = Events.objects.filter(school=request.user.school)
     return render(request, 'main_app/events_list.html', {'events': events})
 
-@login_required
+@admin_required
 def events_detail(request, pk):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can access event records.")
-        return redirect('dashboard')
+    
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
+        # No active session
         return render(request, 'main_app/no_session.html')
     event = get_object_or_404(Events, pk=pk, school=request.user.school)
     return render(request, 'main_app/events_detail.html', {'event': event})
 
-@login_required
+@admin_required
 def events_create(request):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can create events.")
-        return redirect('dashboard')
+    
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
+        # No active session
         return render(request, 'main_app/no_session.html')
     if request.method == 'POST':
         form = EventsForm(request.POST, user=request.user)
@@ -2654,16 +2534,14 @@ def events_create(request):
         form = EventsForm(user=request.user)
     return render(request, 'main_app/events_form.html', {'form': form, 'title': 'Add Event'})
 
-@login_required
+@admin_required
 def events_update(request, pk):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can update events.")
-        return redirect('dashboard')
+    
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
+        # No active session
         return render(request, 'main_app/no_session.html')
     event = get_object_or_404(Events, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2676,16 +2554,14 @@ def events_update(request, pk):
         form = EventsForm(instance=event, user=request.user)
     return render(request, 'main_app/events_form.html', {'form': form, 'title': 'Edit Event'})
 
-@login_required
+@admin_required
 def events_delete(request, pk):
-    if not is_admin(request.user):
-        messages.error(request, "Only admins can delete events.")
-        return redirect('dashboard')
+    
     if not request.user.school:
         messages.error(request, "You are not associated with any school.")
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
+    if not get_active_session(request):
+        # No active session
         return render(request, 'main_app/no_session.html')
     event = get_object_or_404(Events, pk=pk, school=request.user.school)
     if request.method == 'POST':
@@ -2698,7 +2574,7 @@ def events_delete(request, pk):
 
 
 
-@login_required
+@admin_required
 def analytics(request):
     chart_html = None
     form = AnalyticsForm(request.POST or None, request=request)
@@ -2842,7 +2718,7 @@ def analytics(request):
     })
 
 
-@login_required
+@admin_required
 def session_analytics(request):
     # 1️⃣ Get school for logged-in user
     if hasattr(request.user, 'school'):
@@ -2966,7 +2842,7 @@ def session_analytics(request):
 
 
 
-@login_required
+@admin_required
 def get_model_fields(request):
     model_name = request.GET.get('model_name')
     try:
@@ -2980,30 +2856,8 @@ def get_model_fields(request):
         return JsonResponse({'error': 'Model not found'}, status=400)
 
 
-@login_required
-def statistics(request):
-    school = request.user.school
-    active_session = AcademicSession.objects.filter(is_active=True).first()
-
-    total_students = Student.objects.filter(school=school).count()
-    new_admissions = StudentAdmission.objects.filter(school=school, session=active_session).count()
-    total_dues_collected = MonthlyFee.objects.filter(school=school, session=active_session).aggregate(total=Sum('received_amount'))['total'] or 0
-    total_teacher_salary = Expenses.objects.filter(school=school, session=active_session, category='teacher_salary').aggregate(total=Sum('amount'))['total'] or 0
-    total_staff_salary = Expenses.objects.filter(school=school, session=active_session, category='staff_salary').aggregate(total=Sum('amount'))['total'] or 0
-    total_expenses = Expenses.objects.filter(school=school, session=active_session).aggregate(total=Sum('amount'))['total'] or 0
-
-    context = {
-        'total_students': total_students,
-        'new_admissions': new_admissions,
-        'total_dues_collected': total_dues_collected,
-        'total_teacher_salary': total_teacher_salary,
-        'total_staff_salary': total_staff_salary,
-        'total_expenses': total_expenses,
-    }
-    return render(request, 'main_app/statistics.html', context)
-
  
-@login_required
+@admin_required
 def statistics_view(request):
     school = request.user.school
     active_session = AcademicSession.objects.filter(school=school, is_active=True).first()
@@ -3075,8 +2929,7 @@ def statistics_view(request):
     return render(request, 'main_app/statistics.html', context)
 
 
-@login_required
-@user_passes_test(is_admin)
+@admin_required
 def download_backup(request):
     user_school = request.user.school
     sessions = AcademicSession.objects.filter(school=user_school)
@@ -3165,11 +3018,12 @@ def download_backup(request):
 
     elif format_choice == 'csv':
         zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        with ZipFile(zip_buffer, 'w', ZIP_DEFLATED) as zip_file:
             for sheet_name, df in model_dataframes.items():
                 csv_stream = StringIO()
                 df.to_csv(csv_stream, index=False)
                 zip_file.writestr(f"{sheet_name}.csv", csv_stream.getvalue())
+    
         zip_buffer.seek(0)
         response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
         response['Content-Disposition'] = f'attachment; filename="{user_school.school_name}_csv_backup_{session.session_name}.zip"'

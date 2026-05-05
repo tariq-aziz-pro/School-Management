@@ -1,6 +1,6 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm
-from .models import CustomUser, School, FeeStructure, AcademicSession, StudentAdmission, MonthlyFee, CLASS_CHOICES, SECTION_CHOICES, Student, SchoolSubscription, Subject, StudentResult, Teacher, Student, TemporaryPassword, Syllabus, Staff, Assets, Expenses, Transport, Events
+from .models import CustomUser, School, FeeStructure, AcademicSession, StudentAdmission, MonthlyFee, CLASS_CHOICES, SECTION_CHOICES, Student, SchoolSubscription, Subject, StudentResult, Teacher, Student, TemporaryPassword, Syllabus, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
 from django.utils import timezone
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
@@ -14,24 +14,10 @@ from django.contrib.auth.forms import UserCreationForm
 import re
 import logging
 from django.apps import apps
+from .utils import get_previous_balance, calculate_total_dues, validate_transport
 
 
-# Define class progression
-CLASS_PROGRESSION = {
-    'PG': 'Nursery',
-    'Nursery': 'KG',
-    'KG': '1',
-    '1': '2',
-    '2': '3',
-    '3': '4',
-    '4': '5',
-    '5': '6',
-    '6': '7',
-    '7': '8',
-    '8': '9',
-    '9': '10',
-    '10': None
-}
+
 
 
 logger = logging.getLogger(__name__)
@@ -130,34 +116,16 @@ class StudentUserForm(forms.ModelForm):
                 user.school = student.school
                 user.save()
                 TemporaryPassword.objects.create(user=user, password=plain_password)
-                logger.info(f"Student account created: Username={user.username}, School={user.school.school_name}, Password={plain_password}")
+                logger.info(f"Student account created: Username={user.username}, School={user.school.school_name}")
             except Exception as e:
                 logger.error(f"Error saving student user: {str(e)}")
                 raise
         return user, plain_password
 
 class SchoolSubscriptionForm(forms.ModelForm):
-    payment_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
-
-    class Meta:
-        model = SchoolSubscription
-        fields = ['payment_type', 'payment_method', 'amount', 'payment_date']
-        widgets = {
-            'payment_type': forms.Select(choices=[
-                ('subscription', 'Subscription'),
-                ('renewal', 'Renewal'),
-                ('other', 'Other'),
-            ], attrs={'class': 'form-control'}),
-            'payment_method': forms.Select(choices=[
-                ('bank_transfer', 'Bank Transfer'),
-                ('credit_card', 'Credit Card'),
-                ('cash', 'Cash'),
-            ], attrs={'class': 'form-control'}),
-            'amount': forms.NumberInput(attrs={'step': '0.01', 'class': 'form-control'}),
-        }
-
-class AddPaymentForm(forms.ModelForm):
-    payment_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
+    payment_date = forms.DateField(
+        widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'})
+    )
 
     class Meta:
         model = SchoolSubscription
@@ -165,8 +133,15 @@ class AddPaymentForm(forms.ModelForm):
         widgets = {
             'payment_type': forms.Select(attrs={'class': 'form-control'}),
             'payment_method': forms.Select(attrs={'class': 'form-control'}),
-            'amount': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'amount': forms.NumberInput(attrs={'step': '0.01', 'class': 'form-control'}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Optional: Add empty choice for better UX
+        self.fields['payment_type'].empty_label = "Select Payment Type"
+        self.fields['payment_method'].empty_label = "Select Payment Method"
+
 
 class SchoolRegisterForm(UserCreationForm):
     school_name = forms.CharField(max_length=200, widget=forms.TextInput(attrs={'class': 'form-control'}))
@@ -215,27 +190,25 @@ class SchoolRegisterForm(UserCreationForm):
         return email
 
     def save(self, commit=True):
-        logger.debug(f"Saving SchoolRegisterForm: Username={self.cleaned_data.get('username')}, School={self.cleaned_data.get('school_name')}")
         user = super().save(commit=False)
-        user.user_type = 1  # Admin
-        user.is_active = True  # Allow immediate login
+        user.user_type = 1
+        user.is_active = True
         if commit:
             try:
                 user.save()
-                school = School(
+                school = School.objects.create(
                     school_name=self.cleaned_data['school_name'],
                     school_logo=self.cleaned_data.get('school_logo'),
                     city=self.cleaned_data['city'],
                     owner_name=self.cleaned_data['owner_name'],
                     contact_number=self.cleaned_data['contact_number'],
-                    number_of_students=self.cleaned_data['number_of_students'],
+                    number_of_students=self.cleaned_data.get('number_of_students', 0),
                     admin_user=user,
-                    is_active=True  # School is active by default
+                    is_active=True
                 )
-                school.save()
                 user.school = school
                 user.save()
-                logger.info(f"School and user saved: Username={user.username}, School={school.school_name}")
+                logger.info(f"School registered: Username={user.username}, School={school.school_name}")
             except Exception as e:
                 logger.error(f"Error saving school/user: {str(e)}")
                 raise
@@ -324,29 +297,10 @@ class EditStudentForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        transport = cleaned_data.get('transport')
-        if transport == 'Paid':
-            required_fields = ['vehicle_no', 'route', 'driver_contact', 'transport_fee']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for paid transport.')
-        elif transport == 'Free':
-            required_fields = ['vehicle_no', 'route', 'driver_contact']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for free transport.')
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        elif transport == 'No':
-            cleaned_data['vehicle_no'] = ''
-            cleaned_data['route'] = ''
-            cleaned_data['driver_contact'] = ''
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        section = cleaned_data.get('section')
-        if not section:
+        cleaned_data = validate_transport(cleaned_data, self)
+        if not cleaned_data.get('section'):
             self.add_error('section', 'Section name is required.')
-        discount = cleaned_data.get('discount', Decimal('0.00'))
-        discount_behalf = cleaned_data.get('discount_behalf')
-        if discount > 0 and not discount_behalf:
+        if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
         return cleaned_data
 
@@ -511,12 +465,9 @@ class StudentAdmissionForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        transport = cleaned_data.get('transport')
-        section = cleaned_data.get('section')
+
+        # Roll number validation
         roll_number = cleaned_data.get('roll_number')
-        class_name = cleaned_data.get('class_name')
-        discount = cleaned_data.get('discount', Decimal('0.00'))
-        discount_behalf = cleaned_data.get('discount_behalf')
         if roll_number is None or roll_number == '':
             self.add_error('roll_number', 'Roll number is required.')
         else:
@@ -524,60 +475,59 @@ class StudentAdmissionForm(forms.ModelForm):
                 cleaned_data['roll_number'] = int(roll_number)
             except (ValueError, TypeError):
                 self.add_error('roll_number', 'Roll number must be a valid integer.')
-        if not class_name:
+
+        # Required field checks
+        if not cleaned_data.get('class_name'):
             self.add_error('class_name', 'Class name is required.')
-        if not section:
+        if not cleaned_data.get('section'):
             self.add_error('section', 'Section is required.')
-        if transport == 'Paid':
-            required_fields = ['vehicle_no', 'route', 'driver_contact', 'transport_fee']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for paid transport.')
-        elif transport == 'Free':
-            required_fields = ['vehicle_no', 'route', 'driver_contact']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for free transport.')
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        elif transport == 'No':
-            cleaned_data['vehicle_no'] = ''
-            cleaned_data['route'] = ''
-            cleaned_data['driver_contact'] = ''
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        fee_fields = ['admission_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee']
-        for field in fee_fields:
+
+        # Transport validation via helper
+        cleaned_data = validate_transport(cleaned_data, self)
+
+        # Default fee fields to zero
+        for field in ['admission_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee']:
             if cleaned_data.get(field) is None:
                 cleaned_data[field] = Decimal('0.00')
+
         cleaned_data['promotion_fee'] = Decimal('0.00')
         cleaned_data['promoted'] = False
-        if discount > 0 and not discount_behalf:
+
+        # Discount validation
+        if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
+
         return cleaned_data
 
     def save(self, commit=True):
-        student = Student(
-            school=self.request.user.school if self.request and hasattr(self.request, 'user') and self.request.user.school else None,
-            first_name=self.cleaned_data['first_name'],
-            last_name=self.cleaned_data['last_name'],
-            father_guardian_name=self.cleaned_data['father_guardian_name'],
-            contact=self.cleaned_data['contact'],
-            date_of_birth=self.cleaned_data['date_of_birth'],
-            gender=self.cleaned_data['gender'],
-            image = self.cleaned_data.get('temp_image')
-
-        )
-        if commit:
-            student.save()
+        """Only creates/updates StudentAdmission. Student should be created in the view."""
         admission = super().save(commit=False)
-        admission.student = student
-        admission.academic_session = AcademicSession.objects.filter(is_active=True, school=self.request.user.school).first() if self.request and self.request.user.school else None
+    
+        # Set required fields
+        admission.academic_session = AcademicSession.objects.filter(
+            is_active=True, 
+            school=self.request.user.school
+        ).first() if self.request and self.request.user.school else None
+    
         admission.operator = self.request.user if self.request else None
+        admission.admission_date = datetime.date.today()
+        admission.admission_fee = Decimal('0.00')
+        admission.status = True
+        admission.promoted = False
+
         if admission.roll_number:
             admission.roll_number = int(admission.roll_number)
+
         if commit:
-            if not all([admission.roll_number, admission.class_name, admission.section, admission.academic_session]):
-                raise ValueError(f"Cannot save admission: missing required fields: roll_number={admission.roll_number}, class_name={admission.class_name}, section={admission.section}, academic_session={admission.academic_session}")
+            if not all([admission.roll_number, admission.class_name, 
+                      admission.section, admission.academic_session]):
+                raise ValueError(
+                    f"Cannot save admission: missing required fields. "
+                    f"roll_number={admission.roll_number}, class_name={admission.class_name}, "
+                    f"section={admission.section}, academic_session={admission.academic_session}"
+                )
             admission.save()
+    
         return admission
 
 class MonthlyFeeForm(forms.ModelForm):
@@ -774,46 +724,22 @@ class PromoteOfflineStudentForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        transport = cleaned_data.get('transport')
-        if transport == 'Paid':
-            required_fields = ['vehicle_no', 'route', 'driver_contact', 'transport_fee']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for paid transport.')
-        elif transport == 'Free':
-            required_fields = ['vehicle_no', 'route', 'driver_contact']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for free transport.')
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        elif transport == 'No':
-            cleaned_data['vehicle_no'] = ''
-            cleaned_data['route'] = ''
-            cleaned_data['driver_contact'] = ''
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        section = cleaned_data.get('section')
-        if not section:
+        cleaned_data = validate_transport(cleaned_data, self)
+
+        if not cleaned_data.get('section'):
             self.add_error('section', 'Section is required.')
-        fee_fields = ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee']
-        for field in fee_fields:
+
+        # Default fee fields to zero
+        for field in ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee']:
             if cleaned_data.get(field) is None:
                 cleaned_data[field] = Decimal('0.00')
-        discount = cleaned_data.get('discount', Decimal('0.00'))
-        discount_behalf = cleaned_data.get('discount_behalf')
-        if discount > 0 and not discount_behalf:
+
+        if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
-        total_dues = (
-            Decimal(str(cleaned_data.get('tuition_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('exam_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('book_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('uniform_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('other_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('promotion_fee', 0.00))) +
-            Decimal(str(cleaned_data.get('transport_fee', 0.00))) -
-            Decimal(str(cleaned_data.get('discount', 0.00)))
-        )
+
+        total_dues = calculate_total_dues(cleaned_data)
         cleaned_data['total_dues'] = total_dues
-        cleaned_data['balance'] = total_dues - Decimal(str(cleaned_data.get('received', 0.00)))
+        cleaned_data['balance'] = total_dues - Decimal(str(cleaned_data.get('received') or '0.00'))
         return cleaned_data
 
     def save(self, commit=True):
@@ -885,143 +811,90 @@ class PromoteExistingStudentForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop('request', None)
         self.student_admission = kwargs.pop('student_admission', None)
-        filtered_class = kwargs.pop('filtered_class', None)
-        filtered_section = kwargs.pop('filtered_section', None)
+        self.filtered_class = kwargs.pop('filtered_class', None)
+        self.filtered_section = kwargs.pop('filtered_section', None)
         super().__init__(*args, **kwargs)
         self.helper = FormHelper()
         self.helper.form_method = 'POST'
         self.helper.add_input(Submit('submit', 'Promote Student'))
 
         if self.student_admission and self.request and self.request.user.school:
-            student = self.student_admission.student
-            # Set initial class_name to the next class
-            current_class = self.student_admission.class_name
-            next_class = CLASS_PROGRESSION.get(current_class, current_class)
-            self.fields['class_name'].initial = filtered_class or next_class or current_class
-            self.fields['section'].initial = filtered_section or self.student_admission.section
-            self.fields['roll_number'].initial = self.student_admission.roll_number
-            self.fields['first_name'].initial = student.first_name
-            self.fields['last_name'].initial = student.last_name
-            self.fields['father_guardian_name'].initial = student.father_guardian_name
-            self.fields['contact'].initial = student.contact
-            self.fields['date_of_birth'].initial = student.date_of_birth
-            self.fields['gender'].initial = student.gender
-            self.fields['image'].initial = student.image
-            self.fields['transport'].initial = self.student_admission.transport
-            self.fields['vehicle_no'].initial = self.student_admission.vehicle_no
-            self.fields['route'].initial = self.student_admission.route
-            self.fields['driver_contact'].initial = self.student_admission.driver_contact
-            self.fields['transport_fee'].initial = self.student_admission.transport_fee or Decimal('0.00')
-            self.fields['discount'].initial = self.student_admission.discount or Decimal('0.00')
-            self.fields['discount_behalf'].initial = self.student_admission.discount_behalf
-            self.fields['received'].initial = Decimal('0.00')  # Explicitly set to 0.00 for manual input
-
+            self._prefill_student_data()
             try:
-                current_session = AcademicSession.objects.get(is_active=True, school=self.request.user.school)
-                # Calculate previous balance from last month's current_balance in previous session
-                previous_balance = Decimal('0.00')
-                previous_session = AcademicSession.objects.filter(
-                    is_active=False,
-                    end_date__lt=current_session.start_date,
-                    school=self.request.user.school
-                ).order_by('-end_date').first()
-                if previous_session:
-                    last_month = previous_session.end_date.strftime('%B')
-                    last_year = previous_session.end_date.year
-                    # Fetch MonthlyFee for the last month of previous session
-                    last_fee = MonthlyFee.objects.filter(
-                        student_admission__student=student,
-                        student_admission__academic_session=previous_session,
-                        month=last_month,
-                        year=last_year,
-                        student_admission__student__school=self.request.user.school
-                    ).order_by('-id').first()
-                    if last_fee:
-                        previous_balance = last_fee.current_balance
-                    else:
-                        # Fallback to most recent MonthlyFee in previous session
-                        last_fee = MonthlyFee.objects.filter(
-                            student_admission__student=student,
-                            student_admission__academic_session=previous_session,
-                            student_admission__student__school=self.request.user.school
-                        ).order_by('-year', '-id').first()
-                        if last_fee:
-                            previous_balance = last_fee.current_balance
-                        else:
-                            # Final fallback to StudentAdmission.balance from previous session
-                            prev_admission = StudentAdmission.objects.filter(
-                                student=student,
-                                academic_session=previous_session,
-                                student__school=self.request.user.school
-                            ).first()
-                            if prev_admission:
-                                previous_balance = prev_admission.balance or Decimal('0.00')
-                else:
-                    # No previous session, fallback to most recent MonthlyFee or StudentAdmission.balance
-                    last_fee = MonthlyFee.objects.filter(
-                        student_admission__student=student,
-                        student_admission__student__school=self.request.user.school
-                    ).order_by('-year', '-id').first()
-                    if last_fee:
-                        previous_balance = last_fee.current_balance
-                    else:
-                        previous_balance = self.student_admission.balance or Decimal('0.00')
-                self.fields['previous_balance'].initial = previous_balance
-
-                # Populate fee structure for selected class
-                selected_class = self.fields['class_name'].initial
-                try:
-                    fee_structure = FeeStructure.objects.get(academic_session=current_session, class_name=selected_class)
-                    self.fields['tuition_fee'].initial = fee_structure.tuition_fee
-                    self.fields['exam_fee'].initial = fee_structure.paper_money
-                    self.fields['book_fee'].initial = fee_structure.books_dues
-                    self.fields['uniform_fee'].initial = fee_structure.uniform_dues
-                    self.fields['other_fee'].initial = fee_structure.other_charges or Decimal('0.00')
-                    self.fields['promotion_fee'].initial = fee_structure.promotion_fee
-                except FeeStructure.DoesNotExist:
-                    self.fields['tuition_fee'].initial = Decimal('0.00')
-                    self.fields['exam_fee'].initial = Decimal('0.00')
-                    self.fields['book_fee'].initial = Decimal('0.00')
-                    self.fields['uniform_fee'].initial = Decimal('0.00')
-                    self.fields['other_fee'].initial = Decimal('0.00')
-                    self.fields['promotion_fee'].initial = Decimal('0.00')
-
-                # Calculate total_dues and balance
-                total_dues = (
-                    self.fields['previous_balance'].initial +
-                    self.fields['tuition_fee'].initial +
-                    self.fields['exam_fee'].initial +
-                    self.fields['book_fee'].initial +
-                    self.fields['uniform_fee'].initial +
-                    (self.fields['other_fee'].initial or Decimal('0.00')) +
-                    self.fields['promotion_fee'].initial +
-                    (self.fields['transport_fee'].initial or Decimal('0.00')) -
-                    (self.fields['discount'].initial or Decimal('0.00'))
+                current_session = AcademicSession.objects.get(
+                    is_active=True, school=self.request.user.school
                 )
-                self.fields['total_dues'].initial = total_dues
-                self.fields['balance'].initial = total_dues - (self.fields['received'].initial or Decimal('0.00'))
+                self._set_previous_balance(current_session)
+                self._set_fee_structure(current_session)
+                self._calculate_totals()
             except AcademicSession.DoesNotExist:
-                self.fields['previous_balance'].initial = Decimal('0.00')
-                self.fields['tuition_fee'].initial = Decimal('0.00')
-                self.fields['exam_fee'].initial = Decimal('0.00')
-                self.fields['book_fee'].initial = Decimal('0.00')
-                self.fields['uniform_fee'].initial = Decimal('0.00')
-                self.fields['other_fee'].initial = Decimal('0.00')
-                self.fields['promotion_fee'].initial = Decimal('0.00')
-                self.fields['total_dues'].initial = Decimal('0.00')
-                self.fields['balance'].initial = Decimal('0.00')
+                self._set_all_fees_zero()
         else:
-            self.fields['previous_balance'].initial = Decimal('0.00')
-            self.fields['tuition_fee'].initial = Decimal('0.00')
-            self.fields['exam_fee'].initial = Decimal('0.00')
-            self.fields['book_fee'].initial = Decimal('0.00')
-            self.fields['uniform_fee'].initial = Decimal('0.00')
-            self.fields['other_fee'].initial = Decimal('0.00')
-            self.fields['promotion_fee'].initial = Decimal('0.00')
-            self.fields['discount'].initial = Decimal('0.00')
-            self.fields['received'].initial = Decimal('0.00')
-            self.fields['total_dues'].initial = Decimal('0.00')
-            self.fields['balance'].initial = Decimal('0.00')
+            self._set_all_fees_zero()
+
+    def _prefill_student_data(self):
+        student = self.student_admission.student
+        current_class = self.student_admission.class_name
+        next_class = CLASS_PROGRESSION.get(current_class, current_class)
+        self.fields['class_name'].initial = self.filtered_class or next_class or current_class
+        self.fields['section'].initial = self.filtered_section or self.student_admission.section
+        self.fields['roll_number'].initial = self.student_admission.roll_number
+        self.fields['first_name'].initial = student.first_name
+        self.fields['last_name'].initial = student.last_name
+        self.fields['father_guardian_name'].initial = student.father_guardian_name
+        self.fields['contact'].initial = student.contact
+        self.fields['date_of_birth'].initial = student.date_of_birth
+        self.fields['gender'].initial = student.gender
+        self.fields['image'].initial = student.image
+        self.fields['transport'].initial = self.student_admission.transport
+        self.fields['vehicle_no'].initial = self.student_admission.vehicle_no
+        self.fields['route'].initial = self.student_admission.route
+        self.fields['driver_contact'].initial = self.student_admission.driver_contact
+        self.fields['transport_fee'].initial = self.student_admission.transport_fee or Decimal('0.00')
+        self.fields['discount'].initial = self.student_admission.discount or Decimal('0.00')
+        self.fields['discount_behalf'].initial = self.student_admission.discount_behalf
+        self.fields['received'].initial = Decimal('0.00')
+        
+    def _set_previous_balance(self, current_session):
+        previous_balance = get_previous_balance(self.student_admission, current_session)
+        self.fields['previous_balance'].initial = previous_balance
+
+    def _set_fee_structure(self, current_session):
+        selected_class = self.fields['class_name'].initial
+        try:
+            fee = FeeStructure.objects.get(
+                academic_session=current_session,
+                class_name=selected_class
+            )
+            self.fields['tuition_fee'].initial = fee.tuition_fee
+            self.fields['exam_fee'].initial = fee.paper_money
+            self.fields['book_fee'].initial = fee.books_dues
+            self.fields['uniform_fee'].initial = fee.uniform_dues
+            self.fields['other_fee'].initial = fee.other_charges or Decimal('0.00')
+            self.fields['promotion_fee'].initial = fee.promotion_fee
+        except FeeStructure.DoesNotExist:
+            self._set_fees_to_zero()
+
+    def _calculate_totals(self):
+        initial_data = {
+            field: self.fields[field].initial
+            for field in [
+                'previous_balance', 'tuition_fee', 'exam_fee', 'book_fee',
+                'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee', 'discount'
+            ]
+        }
+        total_dues = calculate_total_dues(initial_data)
+        self.fields['total_dues'].initial = total_dues
+        self.fields['balance'].initial = total_dues - (self.fields['received'].initial or Decimal('0.00'))
+
+    def _set_fees_to_zero(self):
+        for field in ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee']:
+            self.fields[field].initial = Decimal('0.00')
+
+    def _set_all_fees_zero(self):
+        self._set_fees_to_zero()
+        for field in ['previous_balance', 'discount', 'received', 'total_dues', 'balance', 'transport_fee']:
+            self.fields[field].initial = Decimal('0.00')            
 
     def clean_roll_number(self):
         roll_number = self.cleaned_data.get('roll_number')
@@ -1044,43 +917,17 @@ class PromoteExistingStudentForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        transport = cleaned_data.get('transport')
-        if transport == 'Paid':
-            required_fields = ['vehicle_no', 'route', 'driver_contact', 'transport_fee']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for paid transport.')
-        elif transport == 'Free':
-            required_fields = ['vehicle_no', 'route', 'driver_contact']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for free transport.')
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        elif transport == 'No':
-            cleaned_data['vehicle_no'] = ''
-            cleaned_data['route'] = ''
-            cleaned_data['driver_contact'] = ''
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        section = cleaned_data.get('section')
-        if not section:
+        cleaned_data = validate_transport(cleaned_data, self)
+
+        if not cleaned_data.get('section'):
             self.add_error('section', 'Section is required.')
-        discount = cleaned_data.get('discount', Decimal('0.00'))
-        discount_behalf = cleaned_data.get('discount_behalf')
-        if discount > 0 and not discount_behalf:
+
+        if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
-        total_dues = (
-            cleaned_data.get('previous_balance', Decimal('0.00')) +
-            cleaned_data.get('tuition_fee', Decimal('0.00')) +
-            cleaned_data.get('exam_fee', Decimal('0.00')) +
-            cleaned_data.get('book_fee', Decimal('0.00')) +
-            cleaned_data.get('uniform_fee', Decimal('0.00')) +
-            cleaned_data.get('other_fee', Decimal('0.00')) +
-            cleaned_data.get('promotion_fee', Decimal('0.00')) +
-            cleaned_data.get('transport_fee', Decimal('0.00')) -
-            cleaned_data.get('discount', Decimal('0.00'))
-        )
+
+        total_dues = calculate_total_dues(cleaned_data)
         cleaned_data['total_dues'] = total_dues
-        cleaned_data['balance'] = total_dues - cleaned_data.get('received', Decimal('0.00'))
+        cleaned_data['balance'] = total_dues - Decimal(str(cleaned_data.get('received') or '0.00'))
         return cleaned_data
 
     def save(self, commit=True):
@@ -1153,92 +1000,89 @@ class MarkNotPromotedForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop('request', None)
-        self.student_admission = kwargs.pop('student', None)
-        filtered_class = kwargs.pop('filtered_class', None)
-        filtered_section = kwargs.pop('filtered_section', None)
+        self.student_admission = kwargs.pop('student', None)  # ← note: 'student' not 'student_admission'
+        self.filtered_class = kwargs.pop('filtered_class', None)
+        self.filtered_section = kwargs.pop('filtered_section', None)
         super().__init__(*args, **kwargs)
         self.fields['section'].choices = [('', 'Select Section')] + SECTION_CHOICES
         self.fields['class_name'].choices = CLASS_CHOICES
         self.fields['discount_behalf'].choices = [('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES
+
         if self.student_admission and self.request and self.request.user.school:
-            student = self.student_admission.student
-            self.fields['class_name'].initial = self.student_admission.class_name
-            self.fields['section'].initial = filtered_section if filtered_section else self.student_admission.section
-            self.fields['roll_number'].initial = self.student_admission.roll_number
-            self.fields['first_name'].initial = student.first_name
-            self.fields['last_name'].initial = student.last_name
-            self.fields['father_guardian_name'].initial = student.father_guardian_name
-            self.fields['contact'].initial = student.contact
-            self.fields['date_of_birth'].initial = student.date_of_birth
-            self.fields['gender'].initial = student.gender
-            self.fields['transport'].initial = self.student_admission.transport
-            self.fields['vehicle_no'].initial = self.student_admission.vehicle_no
-            self.fields['route'].initial = self.student_admission.route
-            self.fields['driver_contact'].initial = self.student_admission.driver_contact
-            self.fields['transport_fee'].initial = self.student_admission.transport_fee
-            self.fields['discount'].initial = self.student_admission.discount
-            self.fields['discount_behalf'].initial = self.student_admission.discount_behalf
+            self._prefill_student_data()
             try:
-                current_session = AcademicSession.objects.get(is_active=True, school=self.request.user.school)
-                previous_session = AcademicSession.objects.filter(
-                    is_active=False, end_date__lt=current_session.start_date, school=self.request.user.school
-                ).order_by('-end_date').first()
-                previous_balance = Decimal('0.00')
-                if previous_session:
-                    last_month = previous_session.end_date.strftime('%B')
-                    last_year = previous_session.end_date.year
-                    last_fee = MonthlyFee.objects.filter(
-                        student_admission=self.student_admission, month=last_month, year=last_year,
-                        student_admission__student__school=self.request.user.school
-                    ).order_by('-id').first()
-                    if last_fee:
-                        previous_balance = last_fee.current_balance
-                    else:
-                        last_fee = MonthlyFee.objects.filter(
-                            student_admission=self.student_admission, year__lte=last_year,
-                            student_admission__student__school=self.request.user.school
-                        ).order_by('-year', '-id').first()
-                        if last_fee:
-                            previous_balance = last_fee.current_balance
-                self.fields['previous_balance'].initial = previous_balance
-                current_class = self.fields['class_name'].initial
-                try:
-                    fee_structure = FeeStructure.objects.get(academic_session=current_session, class_name=current_class)
-                    self.fields['tuition_fee'].initial = fee_structure.tuition_fee
-                    self.fields['exam_fee'].initial = fee_structure.paper_money
-                    self.fields['book_fee'].initial = fee_structure.books_dues
-                    self.fields['uniform_fee'].initial = fee_structure.uniform_dues
-                    self.fields['other_fee'].initial = fee_structure.other_charges or Decimal('0.00')
-                    self.fields['promotion_fee'].initial = Decimal('0.00')
-                except FeeStructure.DoesNotExist:
-                    self.fields['tuition_fee'].initial = Decimal('0.00')
-                    self.fields['exam_fee'].initial = Decimal('0.00')
-                    self.fields['book_fee'].initial = Decimal('0.00')
-                    self.fields['uniform_fee'].initial = Decimal('0.00')
-                    self.fields['other_fee'].initial = Decimal('0.00')
-                    self.fields['promotion_fee'].initial = Decimal('0.00')
+                current_session = AcademicSession.objects.get(
+                    is_active=True, school=self.request.user.school
+                )
+                self._set_previous_balance(current_session)
+                self._set_fee_structure(current_session)
+                self._calculate_totals()
             except AcademicSession.DoesNotExist:
-                self.fields['previous_balance'].initial = Decimal('0.00')
-                self.fields['tuition_fee'].initial = Decimal('0.00')
-                self.fields['exam_fee'].initial = Decimal('0.00')
-                self.fields['book_fee'].initial = Decimal('0.00')
-                self.fields['uniform_fee'].initial = Decimal('0.00')
-                self.fields['other_fee'].initial = Decimal('0.00')
-                self.fields['promotion_fee'].initial = Decimal('0.00')
-            total_dues = (
-                self.fields['previous_balance'].initial +
-                self.fields['tuition_fee'].initial +
-                self.fields['exam_fee'].initial +
-                self.fields['book_fee'].initial +
-                self.fields['uniform_fee'].initial +
-                (self.fields['other_fee'].initial or Decimal('0.00')) +
-                self.fields['promotion_fee'].initial +
-                (self.fields['transport_fee'].initial or Decimal('0.00')) -
-                (self.fields['discount'].initial or Decimal('0.00'))
+                self._set_all_fees_zero()
+        else:
+            self._set_all_fees_zero()
+
+    def _prefill_student_data(self):
+        student = self.student_admission.student
+        # MarkNotPromoted stays in same class — no CLASS_PROGRESSION needed
+        self.fields['class_name'].initial = self.student_admission.class_name
+        self.fields['section'].initial = self.filtered_section or self.student_admission.section
+        self.fields['roll_number'].initial = self.student_admission.roll_number
+        self.fields['first_name'].initial = student.first_name
+        self.fields['last_name'].initial = student.last_name
+        self.fields['father_guardian_name'].initial = student.father_guardian_name
+        self.fields['contact'].initial = student.contact
+        self.fields['date_of_birth'].initial = student.date_of_birth
+        self.fields['gender'].initial = student.gender
+        self.fields['transport'].initial = self.student_admission.transport
+        self.fields['vehicle_no'].initial = self.student_admission.vehicle_no
+        self.fields['route'].initial = self.student_admission.route
+        self.fields['driver_contact'].initial = self.student_admission.driver_contact
+        self.fields['transport_fee'].initial = self.student_admission.transport_fee or Decimal('0.00')
+        self.fields['discount'].initial = self.student_admission.discount or Decimal('0.00')
+        self.fields['discount_behalf'].initial = self.student_admission.discount_behalf
+        self.fields['received'].initial = Decimal('0.00')
+
+    def _set_previous_balance(self, current_session):
+        previous_balance = get_previous_balance(self.student_admission, current_session)
+        self.fields['previous_balance'].initial = previous_balance
+
+    def _set_fee_structure(self, current_session):
+        current_class = self.student_admission.class_name
+        try:
+            fee = FeeStructure.objects.get(
+                academic_session=current_session,
+                class_name=current_class
             )
-            self.fields['total_dues'].initial = total_dues
-            self.fields['received'].initial = Decimal('0.00')
-            self.fields['balance'].initial = total_dues
+            self.fields['tuition_fee'].initial = fee.tuition_fee
+            self.fields['exam_fee'].initial = fee.paper_money
+            self.fields['book_fee'].initial = fee.books_dues
+            self.fields['uniform_fee'].initial = fee.uniform_dues
+            self.fields['other_fee'].initial = fee.other_charges or Decimal('0.00')
+            self.fields['promotion_fee'].initial = Decimal('0.00')  # not promoted
+        except FeeStructure.DoesNotExist:
+            self._set_fees_to_zero()
+
+    def _calculate_totals(self):
+        initial_data = {
+            field: self.fields[field].initial
+            for field in [
+                'previous_balance', 'tuition_fee', 'exam_fee', 'book_fee',
+                'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee', 'discount'
+            ]
+        }
+        total_dues = calculate_total_dues(initial_data)
+        self.fields['total_dues'].initial = total_dues
+        self.fields['balance'].initial = total_dues  # received is always 0.00 at this point
+
+    def _set_fees_to_zero(self):
+        for field in ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee']:
+            self.fields[field].initial = Decimal('0.00')
+
+    def _set_all_fees_zero(self):
+        self._set_fees_to_zero()
+        for field in ['previous_balance', 'discount', 'received', 'total_dues', 'balance', 'transport_fee']:
+            self.fields[field].initial = Decimal('0.00')        
 
     def clean_roll_number(self):
         roll_number = self.cleaned_data.get('roll_number')
@@ -1261,43 +1105,17 @@ class MarkNotPromotedForm(forms.ModelForm):
 
     def clean(self):
         cleaned_data = super().clean()
-        transport = cleaned_data.get('transport')
-        if transport == 'Paid':
-            required_fields = ['vehicle_no', 'route', 'driver_contact', 'transport_fee']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for paid transport.')
-        elif transport == 'Free':
-            required_fields = ['vehicle_no', 'route', 'driver_contact']
-            for field in required_fields:
-                if not cleaned_data.get(field):
-                    self.add_error(field, 'This field is required for free transport.')
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        elif transport == 'No':
-            cleaned_data['vehicle_no'] = ''
-            cleaned_data['route'] = ''
-            cleaned_data['driver_contact'] = ''
-            cleaned_data['transport_fee'] = Decimal('0.00')
-        section = cleaned_data.get('section')
-        if not section:
+        cleaned_data = validate_transport(cleaned_data, self)
+
+        if not cleaned_data.get('section'):
             self.add_error('section', 'Section is required.')
-        discount = cleaned_data.get('discount', Decimal('0.00'))
-        discount_behalf = cleaned_data.get('discount_behalf')
-        if discount > 0 and not discount_behalf:
+
+        if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
-        total_dues = (
-            cleaned_data.get('previous_balance', Decimal('0.00')) +
-            cleaned_data.get('tuition_fee', Decimal('0.00')) +
-            cleaned_data.get('exam_fee', Decimal('0.00')) +
-            cleaned_data.get('book_fee', Decimal('0.00')) +
-            cleaned_data.get('uniform_fee', Decimal('0.00')) +
-            cleaned_data.get('other_fee', Decimal('0.00')) +
-            cleaned_data.get('promotion_fee', Decimal('0.00')) +
-            cleaned_data.get('transport_fee', Decimal('0.00')) -
-            cleaned_data.get('discount', Decimal('0.00'))
-        )
+
+        total_dues = calculate_total_dues(cleaned_data)
         cleaned_data['total_dues'] = total_dues
-        cleaned_data['balance'] = total_dues - cleaned_data.get('received', Decimal('0.00'))
+        cleaned_data['balance'] = total_dues - Decimal(str(cleaned_data.get('received') or '0.00'))
         return cleaned_data
 
     def save(self, commit=True):
@@ -1389,9 +1207,15 @@ class TeacherForm(forms.ModelForm):
         cleaned_data = super().clean()
         password = cleaned_data.get('password')
         confirm_password = cleaned_data.get('confirm_password')
+
+        # Required on create, optional on update
+        if not self.instance.pk and not password:
+            self.add_error('password', 'Password is required for new teacher accounts.')
+
         if password or confirm_password:
             if password != confirm_password:
-                self.add_error('confirm_password', "Passwords do not match.")
+                self.add_error('confirm_password', 'Passwords do not match.')
+
         return cleaned_data
 
     def clean_children_in_school(self):
@@ -1403,21 +1227,30 @@ class TeacherForm(forms.ModelForm):
     def save(self, commit=True):
         teacher = super().save(commit=False)
         teacher.school = self.request.user.school
+
         if commit:
             if self.instance.pk and self.instance.user:
+                # Updating existing teacher user
                 user = self.instance.user
                 user.username = self.cleaned_data['username']
-                if self.cleaned_data['password']:
+                if self.cleaned_data.get('password'):
                     user.set_password(self.cleaned_data['password'])
                 user.save()
             else:
-                user = CustomUser.objects.create(
+                # Creating new teacher user
+                password = self.cleaned_data.get('password')
+                if not password:
+                    raise forms.ValidationError("Password is required when creating a new teacher account.")
+
+                # ✅ Use create_user — handles hashing, signals, validation correctly
+                user = CustomUser.objects.create_user(
                     username=self.cleaned_data['username'],
-                    password=make_password(self.cleaned_data['password']),
-                    school=self.request.user.school,
-                    user_type=4
+                    password=password,
+                    user_type=4,
+                    school=self.request.user.school
                 )
                 teacher.user = user
+
             teacher.save()
             self.save_m2m()
         return teacher
@@ -1457,16 +1290,26 @@ class StudentResultForm(forms.ModelForm):
         obtained_marks = cleaned_data.get('obtained_marks')
         total_marks = cleaned_data.get('total_marks')
 
-        if theory == 0 and practical == 0 and (total_marks is None or total_marks <= 0):
-            raise forms.ValidationError("Total marks must be greater than 0 when theory and practical are not provided.")
+        # If theory/practical provided, derive total_marks from them
         if theory > 0 or practical > 0:
             cleaned_data['total_marks'] = theory + practical
-        if total_marks <= 0:
+            total_marks = cleaned_data['total_marks']
+
+        # Now validate total_marks — safely handles None
+        if total_marks is None or total_marks <= 0:
             raise forms.ValidationError("Total marks must be greater than 0.")
+
+        if obtained_marks is None:
+            raise forms.ValidationError("Obtained marks are required.")
+
         if obtained_marks > total_marks:
             raise forms.ValidationError("Obtained marks cannot exceed total marks.")
+
         if (theory + practical) > 0 and obtained_marks > (theory + practical):
-            raise forms.ValidationError("Obtained marks cannot exceed the sum of theory and practical marks.")
+            raise forms.ValidationError(
+            "Obtained marks cannot exceed the sum of theory and practical marks."
+            )
+
         return cleaned_data
 
 

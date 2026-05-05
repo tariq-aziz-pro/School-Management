@@ -1,27 +1,269 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-bs-theme="light">
 <head>
     <meta charset="UTF-8">
-    <title>{% block title %}School Management System{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
-        <div class="container">
-            <a class="navbar-brand" href="/">PowerLink School System</a>
-        </div>
-    </nav>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="PowerLink School Management System">
 
-    <div class="container">
-        {% block content %}{% endblock %}
+    <!-- ✅ Dynamic title: "Dashboard — GMS | PowerLink" -->
+    <title>{% block title %}PowerLink SMS{% endblock %}{% if request.user.school %} — {{ request.user.school.school_name }}{% endif %} | PowerLink</title>
+
+    <!-- Bootstrap 5.3 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <!-- NProgress — loading bar for slow pages -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/nprogress/0.2.0/nprogress.min.css">
+
+    <style>
+        /* ── Global resets ─────────────────────────────────────── */
+        body {
+            background-color: #f5f6fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        /* ── Top navbar ────────────────────────────────────────── */
+        .top-navbar {
+            height: 56px;
+            background: linear-gradient(135deg, #1565c0, #1e88e5);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.5rem;
+            position: sticky;
+            top: 0;
+            z-index: 1050;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+        .top-navbar .brand {
+            color: white;
+            font-weight: 700;
+            font-size: 1.1rem;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .top-navbar .brand:hover { color: #e3f2fd; }
+        .top-navbar .school-name {
+            color: #bbdefb;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+        .top-navbar .nav-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .top-navbar .user-badge {
+            color: white;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* ── Dark mode toggle ──────────────────────────────────── */
+        .dark-toggle {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            border-radius: 20px;
+            padding: 4px 12px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .dark-toggle:hover { background: rgba(255,255,255,0.25); }
+
+        /* ── Main layout ───────────────────────────────────────── */
+        /* ✅ No container wrapper — full width for sidebar layouts */
+        .page-wrapper {
+            min-height: calc(100vh - 56px);
+        }
+
+        /* ── Global alert messages ─────────────────────────────── */
+        .global-messages {
+            position: fixed;
+            top: 66px;
+            right: 16px;
+            z-index: 1060;
+            width: 320px;
+        }
+        .global-messages .alert {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 8px;
+            animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to   { transform: translateX(0);    opacity: 1; }
+        }
+
+        /* ── Breadcrumb ────────────────────────────────────────── */
+        .breadcrumb-bar {
+            background: white;
+            border-bottom: 1px solid #dee2e6;
+            padding: 8px 20px;
+            font-size: 0.85rem;
+        }
+        [data-bs-theme="dark"] .breadcrumb-bar {
+            background: #1e1e2e;
+            border-color: #333;
+        }
+
+        /* ── Dark mode overrides ───────────────────────────────── */
+        [data-bs-theme="dark"] body { background-color: #121212; }
+        [data-bs-theme="dark"] .top-navbar {
+            background: linear-gradient(135deg, #0d1b2a, #1a2744);
+        }
+        [data-bs-theme="dark"] .page-wrapper { background: #121212; }
+
+        /* ── NProgress bar color ───────────────────────────────── */
+        #nprogress .bar { background: #42a5f5 !important; }
+        #nprogress .peg  { box-shadow: 0 0 10px #42a5f5, 0 0 5px #42a5f5 !important; }
+
+        /* ── Utility ───────────────────────────────────────────── */
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+    </style>
+
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body>
+
+<!-- ✅ Single top navbar — replaces the old double navbar -->
+<nav class="top-navbar">
+    <!-- Left — branding -->
+    <div class="d-flex align-items-center gap-3">
+        {% block sidebar_toggle %}{% endblock %}
+        <a href="/" class="brand">
+            <i class="fas fa-school"></i>
+            PowerLink SMS
+        </a>
+        {% if request.user.is_authenticated and request.user.school %}
+            <span class="school-name d-none d-md-inline">
+                <i class="fas fa-circle-dot me-1" style="font-size:0.6rem;"></i>
+                {{ request.user.school.school_name }}
+            </span>
+        {% endif %}
     </div>
 
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    {% block extra_js %}{% endblock %}
+    <!-- Center — active session badge -->
+    {% block session_badge %}{% endblock %}
+
+    <!-- Right — user info + dark mode + logout -->
+    <div class="nav-actions">
+        {% if request.user.is_authenticated %}
+            <span class="user-badge d-none d-sm-flex">
+                <i class="fas fa-user-circle"></i>
+                {{ request.user.username }}
+            </span>
+            <button class="dark-toggle" id="darkToggle" title="Toggle dark mode">
+                <i class="fas fa-moon" id="darkIcon"></i>
+            </button>
+            <form method="post" action="{% url 'logout' %}" class="m-0">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-light">
+                    <i class="fas fa-sign-out-alt me-1"></i>
+                    <span class="d-none d-sm-inline">Logout</span>
+                </button>
+            </form>
+        {% endif %}
+    </div>
+</nav>
+
+<!-- ✅ Breadcrumb slot — each page can fill this -->
+{% block breadcrumb %}{% endblock %}
+
+<!-- ✅ Global flash messages — float top-right, auto dismiss -->
+{% if messages %}
+    <div class="global-messages" id="globalMessages">
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show mb-2" role="alert">
+                {% if message.tags == 'success' %}
+                    <i class="fas fa-check-circle me-2"></i>
+                {% elif message.tags == 'error' or message.tags == 'danger' %}
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                {% elif message.tags == 'warning' %}
+                    <i class="fas fa-triangle-exclamation me-2"></i>
+                {% else %}
+                    <i class="fas fa-info-circle me-2"></i>
+                {% endif %}
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    </div>
+{% endif %}
+
+<!-- ✅ Full width page wrapper — no container crushing sidebar -->
+<div class="page-wrapper">
+    {% block content %}{% endblock %}
+</div>
+
+<!-- Scripts -->
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/nprogress/0.2.0/nprogress.min.js"></script>
+
+<script>
+// ── NProgress — show loading bar on every navigation ──────────────
+NProgress.configure({ showSpinner: false, speed: 400 });
+document.addEventListener('DOMContentLoaded', function () {
+    NProgress.done();
+});
+document.querySelectorAll('a[href]:not([href^="#"]):not([href^="javascript"]):not([target="_blank"])').forEach(function (link) {
+    link.addEventListener('click', function () {
+        NProgress.start();
+    });
+});
+document.querySelectorAll('form').forEach(function (form) {
+    form.addEventListener('submit', function () {
+        NProgress.start();
+    });
+});
+
+// ── Dark mode toggle ───────────────────────────────────────────────
+const html       = document.documentElement;
+const darkToggle = document.getElementById('darkToggle');
+const darkIcon   = document.getElementById('darkIcon');
+
+// Load saved preference
+const savedTheme = localStorage.getItem('theme') || 'light';
+html.setAttribute('data-bs-theme', savedTheme);
+darkIcon.className = savedTheme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+
+darkToggle.addEventListener('click', function () {
+    const current = html.getAttribute('data-bs-theme');
+    const next    = current === 'dark' ? 'light' : 'dark';
+    html.setAttribute('data-bs-theme', next);
+    localStorage.setItem('theme', next);
+    darkIcon.className = next === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+});
+
+// ── Auto dismiss flash messages after 4 seconds ────────────────────
+setTimeout(function () {
+    document.querySelectorAll('#globalMessages .alert').forEach(function (alert) {
+        const bsAlert = bootstrap.Alert.getOrCreateInstance(alert);
+        bsAlert.close();
+    });
+}, 4000);
+
+// ── Tooltips ───────────────────────────────────────────────────────
+document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+    new bootstrap.Tooltip(el);
+});
+</script>
+
+{% block extra_js %}{% endblock %}
 
 </body>
 </html>

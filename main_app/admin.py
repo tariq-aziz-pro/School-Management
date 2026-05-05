@@ -52,9 +52,32 @@ class FeeStructureAdmin(admin.ModelAdmin):
 
 @admin.register(StudentResult)
 class StudentResultAdmin(admin.ModelAdmin):
-    list_display = ['student_admission', 'subject', 'exam_type', 'obtained_marks', 'total_marks', 'percentage', 'grade']
-    search_fields = ['student_admission__student__first_name', 'student_admission__student__last_name', 'subject']
-    list_filter = ['exam_type', 'grade', 'student_admission__class_name']
+
+    # ✅ Callables work with @property fields
+    def get_percentage(self, obj):
+        return f"{obj.percentage:.1f}%"
+    get_percentage.short_description = 'Percentage'
+
+    def get_grade(self, obj):
+        return obj.grade
+    get_grade.short_description = 'Grade'
+
+    list_display = [
+        'student_admission',
+        'subject',
+        'exam_type',
+        'obtained_marks',
+        'total_marks',
+        'get_percentage',  # ✅ callable instead of 'percentage'
+        'get_grade',       # ✅ callable instead of 'grade'
+    ]
+    search_fields = [
+        'student_admission__student__first_name',
+        'student_admission__student__last_name',
+        'subject__name',
+    ]
+    # ✅ 'grade' removed from list_filter — cannot filter on @property
+    list_filter = ['exam_type', 'student_admission__class_name']
 
 @admin.register(MonthlyFee)
 class MonthlyFeeAdmin(admin.ModelAdmin):
