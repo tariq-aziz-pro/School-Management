@@ -121,6 +121,7 @@
         {% endfor %}
       </tbody>
     </table>
+    {% include "main_app/pagination.html" %}
   {% else %}
     <p class="text-muted">No admission records found.</p>
   {% endif %}

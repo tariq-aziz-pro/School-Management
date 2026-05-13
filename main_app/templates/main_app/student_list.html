@@ -1,84 +1,173 @@
 {% extends 'main_app/base.html' %}
-{% block title %}Student Records - School System{% endblock %}
-{% load crispy_forms_tags %}
+{% block title %}Student Records{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Student Records</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<style>
-    .table th, .table td { vertical-align: middle; }
-    @media (max-width: 768px) {
-        .table-responsive { overflow-x: auto; }
-        .form-control { font-size: 0.9rem; }
-    }
-</style>
 
-<div class="container-fluid mt-5">
-    <h3 class="mb-4 text-primary">Student Records</h3>
-    
+<div class="content-area">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h4 class="fw-bold mb-1">Student Records</h4>
+            <p class="text-muted mb-0">Manage all student accounts and login details</p>
+        </div>
+        <a href="{% url 'student_user_create' %}" class="btn btn-primary">
+            <i class="fas fa-user-plus me-2"></i> Create New Student Account
+        </a>
+    </div>
+
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
 
-    <form method="get" class="mb-3">
-        <div class="row g-2">
-            <div class="col-md-3">
-                <select name="class_assigned" class="form-control" onchange="this.form.submit()">
-                    <option value="">All Classes</option>
-                    {% for class in classes %}
-                        <option value="{{ class }}" {% if request.GET.class_assigned == class %}selected{% endif %}>{{ class }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3">
-                <select name="section" class="form-control" onchange="this.form.submit()">
-                    <option value="">All Sections</option>
-                    {% for section in sections %}
-                        <option value="{{ section }}" {% if request.GET.section == section %}selected{% endif %}>{{ section }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-3">
-                <input type="text" name="student_id" class="form-control" placeholder="Search by Student ID" value="{{ request.GET.student_id }}" oninput="this.form.submit()">
-            </div>
+    <!-- Filters -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Class</label>
+                    <select name="class_assigned" class="form-select" onchange="this.form.submit()">
+                        <option value="">All Classes</option>
+                        {% for class in classes %}
+                            <option value="{{ class }}" {% if request.GET.class_assigned == class %}selected{% endif %}>
+                                {{ class }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Section</label>
+                    <select name="section" class="form-select" onchange="this.form.submit()">
+                        <option value="">All Sections</option>
+                        {% for section in sections %}
+                            <option value="{{ section }}" {% if request.GET.section == section %}selected{% endif %}>
+                                {{ section }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted">Student ID</label>
+                    <input type="text" name="student_id" class="form-control" 
+                           placeholder="Search by Student ID..." 
+                           value="{{ request.GET.student_id }}">
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-search"></i> Filter
+                    </button>
+                </div>
+            </form>
         </div>
-    </form>
+    </div>
 
-    <div class="table-responsive">
-        <table class="table table-striped">
-            <thead>
-                <tr>
-                    <th>Student ID</th>
-                    <th>Class</th>
-                    <th>Section</th>
-                    <th>Username</th>
-                    <th>Password</th>
-                    <th>Account Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for student in student_data %}
+    <!-- Students Table -->
+    <div class="card shadow-sm">
+        <div class="card-header bg-light">
+            <h6 class="mb-0 fw-semibold">
+                <i class="fas fa-users me-2"></i> 
+                All Students 
+                <span class="badge bg-primary ms-2">{{ student_data|length }}</span>
+            </h6>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
                     <tr>
-                        <td>{{ student.student_id }}</td>
+                        <th>Student ID</th>
+                        <th>Class</th>
+                        <th>Section</th>
+                        <th>Username</th>
+                        <th>Temporary Password</th>
+                        <th>Account Status</th>
+                        <th class="text-end">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for student in student_data %}
+                    <tr>
+                        <td class="fw-semibold">{{ student.student_id }}</td>
                         <td>{{ student.class_assigned }}</td>
                         <td>{{ student.section }}</td>
-                        <td>{{ student.username }}</td>
-                        <td>{{ student.password }}</td>
+                        <td>{{ student.username|default:"—" }}</td>
+                        <td>
+                            <span class="text-muted small">{{ student.password|default:"—" }}</span>
+                        </td>
                         <td>
                             <span class="badge bg-{% if student.account_status == 'Created' %}success{% else %}warning{% endif %}">
                                 {{ student.account_status }}
                             </span>
                         </td>
+                        <td class="text-end">
+                            {% if student.account_status != 'Created' %}
+                                <a href="{% url 'student_user_create' %}" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-key"></i>
+                                </a>
+                            {% endif %}
+                        </td>
                     </tr>
-                {% empty %}
-                    <tr><td colspan="6">No students found.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="fas fa-users fa-3x mb-3 opacity-50"></i><br>
+                            No students found.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-    <a href="{% url 'student_user_create' %}" class="btn btn-primary mt-3">Create New Student Account</a>
+
+    <!-- Pagination -->
+    {% if page_obj and page_obj.has_other_pages %}
+    <div class="d-flex justify-content-center mt-4">
+        <nav>
+            <ul class="pagination">
+                {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page=1{{ request.GET|urlencode }}">« First</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{{ request.GET|urlencode }}">Previous</a>
+                    </li>
+                {% endif %}
+
+                {% for num in page_obj.paginator.page_range %}
+                    {% if num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                        <li class="page-item {% if num == page_obj.number %}active{% endif %}">
+                            <a class="page-link" href="?page={{ num }}{{ request.GET|urlencode }}">{{ num }}</a>
+                        </li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{{ request.GET|urlencode }}">Next</a>
+                    </li>
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.paginator.num_pages }}{{ request.GET|urlencode }}">Last »</a>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+
 </div>
+
 {% endblock %}

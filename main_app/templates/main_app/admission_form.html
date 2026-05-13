@@ -1,220 +1,213 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-{% load static %}
+
+{% block title %}New Student Admission{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">New Admission</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
-<div class="container mt-5">
+<div class="content-area">
+    <h4 class="fw-bold mb-4">New Student Admission</h4>
+
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
-    {% if form.errors %}
-        <div class="alert alert-danger">
-            <ul>
-                {% for field in form %}
-                    {% for error in field.errors %}
-                        <li>{{ field.label }}: {{ error }}</li>
-                    {% endfor %}
-                {% endfor %}
-                {% for error in form.non_field_errors %}
-                    <li>{{ error }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-    {% endif %}
-    <h2 class="mb-4 text-primary">Student Admission Form</h2>
 
-    <form method="post" enctype="multipart/form-data" novalidate class="row g-4">
+    <form method="post" enctype="multipart/form-data" novalidate id="admissionForm">
         {% csrf_token %}
-        <div class="col-md-4">
-            {{ form.class_name|as_crispy_field }}
-        </div>
-        <h4>Student Information</h4>
-        {% for field in form %}
-            {% if field.name in 'first_name last_name father_guardian_name contact date_of_birth gender temp_image' %}
-                <div class="col-md-4">
-                    {{ field|as_crispy_field }}
+
+        <!-- Hidden Required Fields -->
+        <input type="hidden" name="admission_date" value="{% now 'Y-m-d' %}">
+        <input type="hidden" name="admission_fee" value="0">
+        <input type="hidden" name="status" value="True">
+
+        <div class="row g-4">
+
+            <!-- Class Selection -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Class Information</h5>
+                        <div class="row">
+                            <div class="col-md-4">{{ form.class_name|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.section|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.roll_number|as_crispy_field }}</div>
+                        </div>
+                    </div>
                 </div>
-            {% endif %}
-        {% endfor %}
+            </div>
 
-        <h4>Admission Details</h4>
-        {% for field in form %}
-            {% if field.name not in 'first_name last_name father_guardian_name contact date_of_birth gender temp_image class_name' %}
-                {% if field.name == 'discount' or field.name == 'discount_behalf' %}
-                    <div class="col-md-4">
-                        {{ field|as_crispy_field }}
+            <!-- Student Personal Information -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Student Information</h5>
+                        <div class="row g-3">
+                            <div class="col-md-4">{{ form.first_name|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.last_name|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.father_guardian_name|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.contact|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.date_of_birth|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.gender|as_crispy_field }}</div>
+                            <div class="col-md-6">{{ form.image|as_crispy_field }}</div>
+                        </div>
                     </div>
-                {% elif field.name == 'transport' %}
-                    <div class="col-md-4">
-                        {{ field|as_crispy_field }}
-                    </div>
-                {% elif field.name == 'vehicle_no' %}
-                    <div class="col-md-4 transport-group" id="transport-free-paid">
-                        {{ field|as_crispy_field }}
-                    </div>
-                {% elif field.name == 'route' %}
-                    <div class="col-md-4 transport-group" id="transport-free-paid">
-                        {{ field|as_crispy_field }}
-                    </div>
-                {% elif field.name == 'driver_contact' %}
-                    <div class="col-md-4 transport-group" id="transport-all">
-                        {{ field|as_crispy_field }}
-                    </div>
-                {% elif field.name == 'transport_fee' %}
-                    <div class="col-md-4 transport-group" id="transport-paid">
-                        {{ field|as_crispy_field }}
-                        <div id="transport_note" class="form-text text-secondary"></div>
-                    </div>
-                {% else %}
-                    <div class="col-md-4">
-                        {{ field|as_crispy_field }}
-                    </div>
-                {% endif %}
-            {% endif %}
-        {% endfor %}
+                </div>
+            </div>
 
-        <div class="col-md-4">
-            <label class="form-label">Operator</label>
-            <input type="text" class="form-control" value="{{ operator_name }}" readonly>
-        </div>
+            <!-- Fee & Transport -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Fee & Transport Details</h5>
+                        <div class="row g-3">
+                            <div class="col-md-4">{{ form.tuition_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.exam_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.book_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.uniform_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.other_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.promotion_fee|as_crispy_field }}</div>
 
-        <div class="col-12">
-            <button type="submit" class="btn btn-success">Submit Admission</button>
+                            <!-- Transport -->
+                            <div class="col-12 mt-4">
+                                <h6 class="mb-3">Transport Information</h6>
+                                <div class="row">
+                                    <div class="col-md-4">{{ form.transport|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.vehicle_no|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.route|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.driver_contact|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.transport_fee|as_crispy_field }}</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">{{ form.discount|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.discount_behalf|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.received|as_crispy_field }}</div>
+
+                            <!-- Hidden Calculated Fields -->
+                            {{ form.total_dues|as_crispy_field }}
+                            {{ form.balance|as_crispy_field }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="col-12">
+                <div class="card border-primary shadow-sm">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">Fee Summary</h5>
+                        <div class="row text-center">
+                            <div class="col-md-4">
+                                <strong>Total Dues</strong><br>
+                                <span id="totalDuesDisplay" class="fs-4 fw-bold text-primary">Rs 0</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Received</strong><br>
+                                <span id="receivedDisplay" class="fs-4 fw-bold">Rs 0</span>
+                            </div>
+                            <div class="col-md-4">
+                                <strong>Balance</strong><br>
+                                <span id="balanceDisplay" class="fs-4 fw-bold text-danger">Rs 0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-success btn-lg px-5">Submit Admission</button>
+            </div>
         </div>
     </form>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-$(document).ready(function () {
-    const classField = $('#id_class_name');
+$(document).ready(function() {
+
+    // Auto fetch fees when class is selected
     function fetchFeeStructure(className) {
+        if (!className) return;
         $.ajax({
-            url: "/ajax/get-fee-structure/",
+            url: "{% url 'get_fee_structure' %}",
             data: { class_name: className },
             dataType: "json",
             success: function (data) {
                 if (!data.error) {
-                    $('#id_admission_fee').val(data.admission_fee.toFixed(2));
-                    $('#id_tuition_fee').val(data.tuition_fee.toFixed(2));
-                    $('#id_exam_fee').val(data.exam_fee.toFixed(2));
-                    $('#id_book_fee').val(data.book_fee.toFixed(2));
-                    $('#id_uniform_fee').val(data.uniform_fee.toFixed(2));
-                    $('#id_other_fee').val(data.other_fee.toFixed(2));
-                    $('#id_transport_fee').val(data.transport_fee.toFixed(2));
-                    $('#id_promotion_fee').val('0.00');
-                } else {
-                    $('#id_admission_fee').val('0.00');
-                    $('#id_tuition_fee').val('0.00');
-                    $('#id_exam_fee').val('0.00');
-                    $('#id_book_fee').val('0.00');
-                    $('#id_uniform_fee').val('0.00');
-                    $('#id_other_fee').val('0.00');
-                    $('#id_transport_fee').val('0.00');
-                    $('#id_promotion_fee').val('0.00');
+                    $('#id_tuition_fee').val(data.tuition_fee);
+                    $('#id_exam_fee').val(data.exam_fee);
+                    $('#id_book_fee').val(data.book_fee);
+                    $('#id_uniform_fee').val(data.uniform_fee);
+                    $('#id_other_fee').val(data.other_fee);
+                    $('#id_promotion_fee').val(data.promotion_fee);
+                    $('#id_transport_fee').val(data.transport_fee || 0);
                 }
                 updateTotalDues();
             }
         });
     }
-    if (classField.val()) {
-        fetchFeeStructure(classField.val());
-    }
-    classField.on('change', function () {
+
+    $('#id_class_name').on('change', function() {
         fetchFeeStructure($(this).val());
     });
 
-    $('#id_admission_fee, #id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input', function () {
+    // Live Total Calculation
+    function updateTotalDues() {
         let total = 0;
-        const ids = ['admission_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee'];
-        ids.forEach(id => {
-            total += parseFloat($('#id_' + id).val()) || 0;
+        const fields = ['tuition_fee','exam_fee','book_fee','uniform_fee','other_fee','promotion_fee','transport_fee'];
+        
+        fields.forEach(field => {
+            total += parseFloat($('#id_' + field).val()) || 0;
         });
+
         const discount = parseFloat($('#id_discount').val()) || 0;
         const received = parseFloat($('#id_received').val()) || 0;
-        const total_due = total - discount;
-        const balance = total_due - received;
-        $('#id_total_dues').val(total_due.toFixed(0));
-        $('#id_balance').val(balance.toFixed(0));
-    });
+        const totalDues = total - discount;
+        const balance = totalDues - received;
 
-    document.getElementById('id_temp_image')?.addEventListener('change', function (e) {
-        const file = e.target.files[0];
-        const preview = document.getElementById('preview-image');
-        if (file && file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = function (e) {
-                preview.src = e.target.result;
-                preview.style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        } else {
-            preview.src = '#';
-            preview.style.display = 'none';
-        }
-    });
+        $('#totalDuesDisplay').text('Rs ' + totalDues.toFixed(0));
+        $('#receivedDisplay').text('Rs ' + received.toFixed(0));
+        $('#balanceDisplay').text('Rs ' + balance.toFixed(0));
 
-    function toggleTransportFieldsAndFetchFee() {
+        // Update hidden fields
+        $('#id_total_dues').val(totalDues.toFixed(2));
+        $('#id_balance').val(balance.toFixed(2));
+    }
+
+    $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input', updateTotalDues);
+
+    // Transport toggle
+    function toggleTransportFields() {
         const transport = $('#id_transport').val();
-        $('#transport-free-paid').hide();
-        $('#transport-all').hide();
-        $('#transport-paid').hide();
-        $('#transport_note').text('');
-        if (transport === 'Paid') {
-            $('#transport-free-paid').show();
-            $('#transport-all').show();
-            $('#transport-paid').show();
-            $.ajax({
-                url: '/ajax/get-transport-details/',
-                data: { transport_option: 'Paid' },
-                dataType: 'json',
-                success: function (data) {
-                    if (!$('#id_transport_fee').val()) {
-                        $('#id_transport_fee').val(data.transport_fee);
-                    }
-                    $('#transport_note').text(data.note || 'You can edit the transport fee if needed.');
-                }
-            });
-        } else if (transport === 'Free') {
-            $('#transport-free-paid').show();
-            $('#transport-all').show();
-            $('#transport-paid').hide();
-            $('#id_transport_fee').val('0');
-            $('#transport_note').text('Free transport for eligible students.');
-        } else if (transport === 'No') {
-            $('#transport-free-paid').hide();
-            $('#transport-all').hide();
-            $('#transport-paid').hide();
-            $('#id_vehicle_no').val('');
-            $('#id_route').val('');
-            $('#id_driver_contact').val('');
-            $('#id_transport_fee').val('0');
-        }
+        $('.transport-group').toggle(transport !== 'No');
+        if (transport === 'No') $('#id_transport_fee').val('0');
     }
-    toggleTransportFieldsAndFetchFee();
-    $('#id_transport').on('change', toggleTransportFieldsAndFetchFee);
-});
 
-document.addEventListener('wheel', function (e) {
-    if (document.activeElement.type === 'number' && document.activeElement === e.target) {
-        e.preventDefault();
-    }
-}, { passive: false });
+    $('#id_transport').on('change', toggleTransportFields);
+    toggleTransportFields();
 
-document.addEventListener('keydown', function (e) {
-    if (document.activeElement.type === 'number' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-    }
+    // Initial calculation
+    updateTotalDues();
 });
 </script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 {% endblock %}
-
 

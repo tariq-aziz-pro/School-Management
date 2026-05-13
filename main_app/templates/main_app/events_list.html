@@ -1,41 +1,91 @@
 {% extends 'main_app/base.html' %}
-{% load crispy_forms_tags %}
-{% block content %}
-<div class="container mt-4">
-    <h2>Events List</h2>
-    <div class="mb-3">
-        <a href="{% url 'events_create' %}" class="btn btn-primary">Add New Event</a>
-        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
-    </div>
-    <table class="table table-striped table-bordered">
-        <thead class="thead-dark">
-            <tr>
-                <th>Event Type</th>
-                <th>Event For</th>
-                <th>Event Date</th>
-                <th>Announcement Date</th>
-                <th>Arranged By</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for event in events %}
-            <tr>
-                <td>{{ event.get_event_type_display }}</td>
-                <td>{{ event.get_event_for_display }}</td>
-                <td>{{ event.event_date }}</td>
-                <td>{{ event.announcement_date }}</td>
-                <td>{{ event.arranged_by }}</td>
-                <td>
-                    <a href="{% url 'events_detail' event.pk %}" class="btn btn-info btn-sm">View</a>
-                    <a href="{% url 'events_update' event.pk %}" class="btn btn-warning btn-sm">Edit</a>
-                    <a href="{% url 'events_delete' event.pk %}" class="btn btn-danger btn-sm">Delete</a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" class="text-center">No events found.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
+{% block title %}Events{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Events</li>
+        </ol>
+    </nav>
 </div>
+{% endblock %}
+
+{% block content %}
+
+<div class="content-area">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0">School Events</h4>
+        
+        {% if not is_student %}
+        <a href="{% url 'events_create' %}" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Add New Event
+        </a>
+        {% endif %}
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="card shadow-sm">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Event Type</th>
+                            <th>For</th>
+                            <th>Event Date</th>
+                            <th>Announcement Date</th>
+                            <th>Arranged By</th>
+                            {% if not is_student %}
+                            <th class="text-end">Actions</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in events %}
+                        <tr>
+                            <td><strong>{{ event.get_event_type_display }}</strong></td>
+                            <td>{{ event.get_event_for_display|default:"All" }}</td>
+                            <td>{{ event.event_date|date:"d M Y" }}</td>
+                            <td>{{ event.announcement_date|date:"d M Y" }}</td>
+                            <td>{{ event.arranged_by|default:"—" }}</td>
+                            
+                            {% if not is_student %}
+                            <td class="text-end">
+                                <a href="{% url 'events_detail' event.pk %}" class="btn btn-sm btn-info me-1">
+                                    <i class="fas fa-eye"></i>
+                                </a>
+                                <a href="{% url 'events_update' event.pk %}" class="btn btn-sm btn-warning me-1">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <a href="{% url 'events_delete' event.pk %}" class="btn btn-sm btn-danger">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="{% if not is_student %}6{% else %}5{% endif %}" class="text-center py-5 text-muted">
+                                No events found.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}

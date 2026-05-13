@@ -83,8 +83,8 @@ class CustomUser(AbstractUser):
         # Skip validation for new users (during creation, pk is None)
         if self.pk is None:
             return
-        if self.user_type == 1 and not self.school:
-            raise ValidationError("Admin users must be associated with a school.")
+        if self.user_type in (1, 2, 3) and not self.school:
+            raise ValidationError("School staff accounts must be associated with a school.")
         super().clean()
 
     def __str__(self):
@@ -109,6 +109,12 @@ class School(models.Model):
     is_active = models.BooleanField(default=True)  # Control system access
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_active']),
+            models.Index(fields=['city']),
+        ]
 
     def __str__(self):
         return self.school_name
@@ -143,7 +149,12 @@ class AcademicSession(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('session_name', 'school')  # Ensure unique session names per school
+        unique_together = (('session_name', 'school'),)   # ← Also make it tuple
+        indexes = [
+            models.Index(fields=['school', 'is_active']),
+            models.Index(fields=['school', 'start_date', 'end_date']),
+            models.Index(fields=['is_active']),
+        ]
 
     def clean(self):
         if not self.school:
@@ -167,6 +178,9 @@ class AcademicSession(models.Model):
 
     def __str__(self):
         return f"{self.session_name} ({self.school.school_name})"
+
+
+
 
 class FeeStructure(models.Model):
     academic_session = models.ForeignKey(AcademicSession, on_delete=models.CASCADE)
@@ -199,6 +213,13 @@ class Student(models.Model):
     image = models.ImageField(upload_to='student_images/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['school', 'student_id']),
+            models.Index(fields=['school']),
+            models.Index(fields=['first_name', 'last_name']),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.student_id:
@@ -261,8 +282,15 @@ class StudentAdmission(models.Model):
     operator = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
-        unique_together = ('roll_number', 'class_name', 'section', 'academic_session')
-
+        unique_together = (('roll_number', 'class_name', 'section', 'academic_session'),)   # ← Fixed
+        indexes = [
+            models.Index(fields=['academic_session', 'class_name', 'section']),
+            models.Index(fields=['student', 'academic_session']),
+            models.Index(fields=['roll_number', 'class_name', 'section', 'academic_session']),
+            models.Index(fields=['promoted', 'failed_to_promote']),
+            models.Index(fields=['status']),
+            models.Index(fields=['academic_session', 'student']),
+        ]
     def save(self, *args, **kwargs):
         if self.transport == 'No':
             self.vehicle_no = None
@@ -318,7 +346,12 @@ class StudentResult(models.Model):
     practical = models.FloatField(default=0.0)
     total_marks = models.FloatField()
     obtained_marks = models.FloatField()
-    # ✅ percentage and grade removed as stored DB fields
+    class Meta:
+        indexes = [
+            models.Index(fields=['student_admission', 'subject', 'exam_type']),
+            models.Index(fields=['student_admission']),
+            models.Index(fields=['exam_type']),
+        ]
 
     @property
     def percentage(self):
@@ -368,9 +401,12 @@ class MonthlyFee(models.Model):
     operator = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
 
     class Meta:
-        unique_together = ('student_admission', 'month', 'year')
+        unique_together = (('student_admission', 'month', 'year'),)   # ← Fixed
         indexes = [
             models.Index(fields=['student_admission', 'month', 'year']),
+            models.Index(fields=['student_admission', 'year']),
+            models.Index(fields=['has_payment']),
+            models.Index(fields=['student_admission', 'payment_date']),
         ]
 
     def clean(self):
@@ -457,6 +493,12 @@ class Teacher(models.Model):
 
     class Meta:
         unique_together = ('school', 'cnic', 'class_name', 'section')
+        indexes = [
+            models.Index(fields=['school', 'class_name', 'section']),
+            models.Index(fields=['school']),
+        ]
+
+    
 
     def __str__(self):
         return f"{self.name} ({self.school.school_name})"
@@ -506,7 +548,11 @@ class Syllabus(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ('school', 'subject', 'class_name', 'academic_session')  # ✅ Prevent duplicates
+        unique_together = ('school', 'subject', 'class_name', 'academic_session')
+        indexes = [
+            models.Index(fields=['school', 'class_name', 'academic_session']),
+            models.Index(fields=['subject', 'class_name']),
+        ]
 
     def __str__(self):
         return f"{self.subject.name} - {self.class_name} ({self.school.school_name})"
@@ -659,6 +705,7 @@ class Events(models.Model):
         ('Celebration', 'Celebration'),
         ('Tour', 'Tour'),
         ('Other', 'Other'),
+        ('Vocation', 'Vocation'),
     ]
     EVENT_FOR_CHOICES = [
         ('All', 'All'),

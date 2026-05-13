@@ -1,11 +1,59 @@
 {% extends 'main_app/base.html' %}
-{% block title %}Home - School System{% endblock %}
+{% load static %}
+
+{% block title %}PowerLink - School Management System{% endblock %}
 
 {% block content %}
-<div class="text-center">
-    <h1>Welcome to PowerLink School Management System</h1>
-    <p class="lead">Streamline your school’s operations with ease.</p>
-    <a href="{% url 'login' %}" class="btn btn-primary btn-lg me-2">Login</a>
-    <a href="{% url 'register_school' %}" class="btn btn-secondary btn-lg">Register School</a>
+
+<div class="min-vh-100 d-flex align-items-center py-5" 
+     style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
+    <div class="container">
+        <div class="row align-items-center">
+            
+            <!-- Left Content -->
+            <div class="col-lg-6">
+                <h1 class="display-4 fw-bold text-primary mb-4">
+                    PowerLink <span class="text-dark">School Management</span>
+                </h1>
+                <p class="lead text-muted mb-5 fs-4">
+                    Complete digital solution for modern schools.<br>
+                    Admissions • Fees • Academics • Reports — All in one platform.
+                </p>
+                
+                <div class="d-flex flex-wrap gap-3">
+                    <a href="{% url 'login' %}" class="btn btn-primary btn-lg px-5 py-3">
+                        <i class="fas fa-sign-in-alt me-2"></i> Login
+                    </a>
+                    <a href="{% url 'register_school' %}" class="btn btn-outline-primary btn-lg px-5 py-3">
+                        <i class="fas fa-school me-2"></i> Register School
+                    </a>
+                </div>
+
+                <div class="mt-5 row g-4 text-center">
+                    <div class="col-4">
+                        <h3 class="fw-bold text-primary mb-1">500+</h3>
+                        <small class="text-muted">Schools</small>
+                    </div>
+                    <div class="col-4">
+                        <h3 class="fw-bold text-primary mb-1">15K+</h3>
+                        <small class="text-muted">Students</small>
+                    </div>
+                    <div class="col-4">
+                        <h3 class="fw-bold text-primary mb-1">98%</h3>
+                        <small class="text-muted">Satisfaction</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side - Preview Image -->
+            <div class="col-lg-6 text-center mt-5 mt-lg-0">
+                <img src="{% static 'main_app/images/dashboard-preview.png' %}" 
+                     alt="PowerLink Dashboard Preview"
+                     class="img-fluid rounded-4 shadow-lg border"
+                     style="max-height: 520px; object-fit: contain;">
+            </div>
+        </div>
+    </div>
 </div>
+
 {% endblock %}

@@ -1,226 +1,255 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-{% load static %}
+
+{% block title %}Promote Offline Student{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Promote Offline Student</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 
-<div class="container mt-5">
-  {% if messages %}
-    {% for message in messages %}
-      <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-        {{ message }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-      </div>
-    {% endfor %}
-  {% endif %}
-  <h2 class="mb-4 text-primary">Promote Offline Student</h2>
+<div class="content-area">
+    <h4 class="fw-bold mb-4">Promote Offline Student</h4>
 
-  <form method="post" enctype="multipart/form-data" novalidate class="row g-4">
-    {% csrf_token %}
-    {% for field in form %}
-      {% if field.name != 'temp_image' %}
-        {% if field.name == 'class_name' %}
-          <div class="col-md-4">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'discount' or field.name == 'discount_behalf' %}
-          <div class="col-md-4">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'transport' %}
-          <div class="col-md-4">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'vehicle_no' %}
-          <div class="col-md-4 transport-group" id="transport-free-paid-fields">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'route' %}
-          <div class="col-md-4 transport-group" id="transport-all-fields">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'driver_contact' %}
-          <div class="col-md-4 transport-group" id="transport-all-fields">
-            {{ field|as_crispy_field }}
-          </div>
-        {% elif field.name == 'transport_fee' %}
-          <div class="col-md-4 transport-group" id="transport-paid-only">
-            {{ field|as_crispy_field }}
-            <div id="transport_note" class="form-text text-secondary mt-1"></div>
-          </div>
-        {% else %}
-          <div class="col-md-4">
-            {{ field|as_crispy_field }}
-          </div>
-        {% endif %}
-      {% endif %}
-    {% endfor %}
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
 
-    <div class="col-md-6">
-      <label for="{{ form.temp_image.id_for_label }}" class="form-label">Upload Student Image</label>
-      {{ form.temp_image|as_crispy_field }}
-      <small class="form-text text-muted">Upload a clear image taken from a phone.</small>
-      <!-- Display previously uploaded image if it exists -->
-      {% if temp_image_path %}
-        <div class="mt-2">
-          <label>Previously Uploaded Image:</label><br>
-          <img src="{{ MEDIA_URL }}{{ temp_image_path }}" alt="Student Image" class="img-thumbnail" style="max-width: 200px; max-height: 200px;">
-          <p class="text-muted">Upload a new image to replace the existing one, or leave blank to keep it.</p>
+    <form method="post" enctype="multipart/form-data" novalidate id="promoteOfflineForm">
+        {% csrf_token %}
+
+        <div class="row g-4">
+
+            <!-- Class Information -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0">Class Information</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4">{{ form.class_name|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.section|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.roll_number|as_crispy_field }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Personal Information -->
+            <div class="col-lg-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0">Personal Information</h5>
+                    </div>
+                    <div class="card-body">
+                        {{ form.first_name|as_crispy_field }}
+                        {{ form.last_name|as_crispy_field }}
+                        {{ form.father_guardian_name|as_crispy_field }}
+                        {{ form.contact|as_crispy_field }}
+                        {{ form.date_of_birth|as_crispy_field }}
+                        {{ form.gender|as_crispy_field }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image Upload -->
+            <div class="col-lg-6">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0">Student Image</h5>
+                    </div>
+                    <div class="card-body">
+                        {{ form.temp_image|as_crispy_field }}
+                        <small class="form-text text-muted">Upload a clear recent photo.</small>
+                        
+                        {% if temp_image_path %}
+                        <div class="mt-3">
+                            <label>Current Image:</label><br>
+                            <img src="{{ MEDIA_URL }}{{ temp_image_path }}" alt="Current Image" 
+                                 class="img-thumbnail" style="max-width: 200px; max-height: 200px;">
+                        </div>
+                        {% endif %}
+                        
+                        <img id="preview-image" src="#" alt="Preview" 
+                             class="img-thumbnail mt-3" style="display: none; max-width: 200px;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Fee & Transport -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h5 class="mb-0">Fee & Transport Details</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">{{ form.tuition_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.exam_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.book_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.uniform_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.other_fee|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.promotion_fee|as_crispy_field }}</div>
+
+                            <!-- Transport -->
+                            <div class="col-12 mt-4">
+                                <h6 class="mb-3">Transport Information</h6>
+                                <div class="row">
+                                    <div class="col-md-4">{{ form.transport|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.vehicle_no|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.route|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.driver_contact|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.transport_fee|as_crispy_field }}</div>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">{{ form.discount|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.discount_behalf|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.received|as_crispy_field }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12 text-end">
+                <a href="{% url 'dashboard' %}" class="btn btn-secondary me-2">Cancel</a>
+                <button type="submit" class="btn btn-success px-5">Promote Student</button>
+            </div>
         </div>
-      {% endif %}
-      <img id="preview-image" src="#" alt="Image Preview" class="img-thumbnail mt-2" style="display: none; max-width: 200px;">
-    </div>
-
-    <div class="col-12">
-      <button type="submit" class="btn btn-success">Promote Student</button>
-      <a href="{% url 'dashboard' %}" class="btn btn-secondary ms-2">Go to Dashboard</a>
-    </div>
-  </form>
+    </form>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+{% endblock %}
 
+{% block extra_js %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-  $(document).ready(function () {
+$(document).ready(function () {
+
     const classField = $('#id_class_name');
     const transportField = $('#id_transport');
 
     // Fetch Fee Structure
     function fetchFeeStructure(className) {
-      $.ajax({
-        url: "/ajax/get-fee-structure/",
-        data: { class_name: className },
-        dataType: "json",
-        success: function (data) {
-          if (!data.error) {
-            $('#id_tuition_fee').val(data.tuition_fee.toFixed(2));
-            $('#id_exam_fee').val(data.exam_fee.toFixed(2));
-            $('#id_book_fee').val(data.book_fee.toFixed(2));
-            $('#id_uniform_fee').val(data.uniform_fee.toFixed(2));
-            $('#id_other_fee').val(data.other_fee.toFixed(2));
-            $('#id_promotion_fee').val(data.promotion_fee.toFixed(2));
-          } else {
-            $('#id_tuition_fee').val('0.00');
-            $('#id_exam_fee').val('0.00');
-            $('#id_book_fee').val('0.00');
-            $('#id_uniform_fee').val('0.00');
-            $('#id_other_fee').val('0.00');
-            $('#id_promotion_fee').val('0.00');
-          }
-          updateTotalDues();
-        },
-        error: function () {
-          $('#id_tuition_fee').val('0.00');
-          $('#id_exam_fee').val('0.00');
-          $('#id_book_fee').val('0.00');
-          $('#id_uniform_fee').val('0.00');
-          $('#id_other_fee').val('0.00');
-          $('#id_promotion_fee').val('0.00');
-          updateTotalDues();
-        }
-      });
+        if (!className) return;
+        $.ajax({
+            url: "/ajax/get-fee-structure/",
+            data: { class_name: className },
+            dataType: "json",
+            success: function (data) {
+                if (!data.error) {
+                    $('#id_tuition_fee').val(data.tuition_fee.toFixed(2));
+                    $('#id_exam_fee').val(data.exam_fee.toFixed(2));
+                    $('#id_book_fee').val(data.book_fee.toFixed(2));
+                    $('#id_uniform_fee').val(data.uniform_fee.toFixed(2));
+                    $('#id_other_fee').val(data.other_fee.toFixed(2));
+                    $('#id_promotion_fee').val(data.promotion_fee.toFixed(2));
+                } else {
+                    resetFeesToZero();
+                }
+                updateTotalDues();
+            },
+            error: function () {
+                resetFeesToZero();
+                updateTotalDues();
+            }
+        });
     }
 
-    if (classField.val()) {
-      fetchFeeStructure(classField.val());
+    function resetFeesToZero() {
+        $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee').val('0.00');
     }
+
     classField.on('change', function () {
-      fetchFeeStructure($(this).val());
+        fetchFeeStructure($(this).val());
     });
 
-    // Transport Logic
-    function toggleTransportFieldsAndFetchFee() {
-      const transport = transportField.val();
-      $('#transport-free-paid-fields').hide();
-      $('#transport-all-fields').hide();
-      $('#transport-paid-only').hide();
-      $('#transport_note').text('');
-
-      if (transport === 'Paid') {
-        $('#transport-free-paid-fields').show();
-        $('#transport-all-fields').show();
-        $('#transport-paid-only').show();
-        $.ajax({
-          url: '/ajax/get-transport-details/',
-          data: { transport_option: 'Paid' },
-          dataType: 'json',
-          success: function (data) {
-            if (!$('#id_transport_fee').val()) {
-              $('#id_transport_fee').val(data.transport_fee.toFixed(2));
-            }
-            $('#transport_note').text(data.note || 'You can edit the transport fee if needed.');
-          }
-        });
-      } else if (transport === 'Free') {
-        $('#transport-free-paid-fields').show();
-        $('#transport-all-fields').show();
-        $('#transport-paid-only').hide();
-        $('#id_transport_fee').val('0.00');
-        $('#transport_note').text('Free transport for eligible students. You can edit this if needed.');
-      } else if (transport === 'No') {
-        $('#id_vehicle_no').val('');
-        $('#id_route').val('');
-        $('#id_driver_contact').val('');
-        $('#id_transport_fee').val('0.00');
-      }
-      updateTotalDues();
+    if (classField.val()) {
+        fetchFeeStructure(classField.val());
     }
 
-    toggleTransportFieldsAndFetchFee();
-    transportField.on('change', toggleTransportFieldsAndFetchFee);
+    // Transport Fields Toggle
+    function toggleTransportFields() {
+        const transport = transportField.val();
+        $('.transport-group').hide();
+        $('#transport_note').text('');
 
-    // Calculate Total Dues and Balance
+        if (transport === 'Paid') {
+            $('.transport-group').show();
+            $.ajax({
+                url: '/ajax/get-transport-details/',
+                data: { transport_option: 'Paid' },
+                dataType: 'json',
+                success: function (data) {
+                    if (!$('#id_transport_fee').val()) {
+                        $('#id_transport_fee').val(data.transport_fee);
+                    }
+                    $('#transport_note').text(data.note || '');
+                }
+            });
+        } else if (transport === 'Free') {
+            $('.transport-group').show();
+            $('#id_transport_fee').val('0.00');
+            $('#transport_note').text('Free transport for eligible students.');
+        } else if (transport === 'No') {
+            $('#id_vehicle_no, #id_route, #id_driver_contact, #id_transport_fee').val('');
+            $('#id_transport_fee').val('0.00');
+        }
+        updateTotalDues();
+    }
+
+    transportField.on('change', toggleTransportFields);
+    toggleTransportFields();
+
+    // Calculate Totals
     function updateTotalDues() {
-      let total = 0;
-      const ids = ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee'];
-      ids.forEach(id => {
-        total += parseFloat($('#id_' + id).val()) || 0;
-      });
+        let total = 0;
+        const ids = ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee'];
+        ids.forEach(id => {
+            total += parseFloat($('#id_' + id).val()) || 0;
+        });
+        const discount = parseFloat($('#id_discount').val()) || 0;
+        const received = parseFloat($('#id_received').val()) || 0;
+        const total_due = total - discount;
+        const balance = total_due - received;
 
-      const discount = parseFloat($('#id_discount').val()) || 0;
-      const received = parseFloat($('#id_received').val()) || 0;
-
-      const total_due = total - discount;
-      const balance = total_due - received;
-
-      $('#id_total_dues').val(total_due.toFixed(2));
-      $('#id_balance').val(balance.toFixed(2));
+        $('#id_total_dues').val(total_due.toFixed(2));
+        $('#id_balance').val(balance.toFixed(2));
     }
 
     $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input', updateTotalDues);
 
     // Image Preview
-    document.getElementById('id_temp_image')?.addEventListener('change', function (e) {
-      const file = e.target.files[0];
-      const preview = document.getElementById('preview-image');
-      if (file && file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = function (e) {
-          preview.src = e.target.result;
-          preview.style.display = 'block';
-        };
-        reader.readAsDataURL(file);
-      } else {
-        preview.src = '#';
-        preview.style.display = 'none';
-      }
+    $('#id_temp_image').on('change', function (e) {
+        const file = e.target.files[0];
+        const preview = $('#preview-image');
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                preview.attr('src', e.target.result).show();
+            };
+            reader.readAsDataURL(file);
+        } else {
+            preview.hide();
+        }
     });
 
-    // Prevent scroll from changing number inputs
-    document.addEventListener('wheel', function (e) {
-      if (document.activeElement.type === 'number' && document.activeElement === e.target) {
-        e.preventDefault();
-      }
-    }, { passive: false });
-
-    document.addEventListener('keydown', function (e) {
-      if (document.activeElement.type === 'number' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-      }
-    });
-  });
+    // Initial calculation
+    updateTotalDues();
+});
 </script>
-
 {% endblock %}

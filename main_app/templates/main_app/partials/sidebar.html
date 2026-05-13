@@ -1,0 +1,201 @@
+<!-- main_app/templates/main_app/partials/sidebar.html -->
+<div class="sidebar shadow-sm" id="mainSidebar">
+    <div class="p-3">
+
+        {% if request.user.school %}
+        <div class="text-center mb-4 px-2">
+            <h5 class="text-white mb-1 text-truncate" title="{{ request.user.school.school_name }}">{{ request.user.school.school_name }}</h5>
+            <small class="text-white-50">{{ request.user.school.city }}</small>
+        </div>
+        {% endif %}
+
+        <ul class="nav flex-column">
+
+            <li class="nav-item mb-1">
+                {% if is_teacher %}
+                <a href="{% url 'teacher_dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'teacher_dashboard' %}active{% endif %}">
+                    <i class="fas fa-gauge-high me-3" aria-hidden="true"></i> My class
+                </a>
+                {% elif is_student %}
+                <a href="{% url 'student_dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'student_dashboard' %}active{% endif %}">
+                    <i class="fas fa-gauge-high me-3" aria-hidden="true"></i> Dashboard
+                </a>
+                {% else %}
+                <a href="{% url 'dashboard' %}" class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
+                    <i class="fas fa-gauge-high me-3" aria-hidden="true"></i> Dashboard
+                </a>
+                {% endif %}
+            </li>
+
+            {% if is_school_staff %}
+            <li class="nav-item mb-1">
+                <a href="{% url 'admission_form' %}" class="nav-link {% if request.resolver_match.url_name == 'admission_form' %}active{% endif %}">
+                    <i class="fas fa-user-plus me-3" aria-hidden="true"></i> New Admission
+                </a>
+            </li>
+
+            <li class="nav-item mb-1">
+                <a href="{% url 'monthly_fee' %}" class="nav-link {% if request.resolver_match.url_name == 'monthly_fee' or request.resolver_match.url_name == 'monthly_fee_detail' %}active{% endif %}">
+                    <i class="fas fa-hand-holding-usd me-3" aria-hidden="true"></i> Monthly Fee
+                </a>
+            </li>
+
+            <li class="section-label mt-3">Promotion</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'promote_existing_students' %}" class="nav-link {% if request.resolver_match.url_name == 'promote_existing_students' %}active{% endif %}">
+                    <i class="fas fa-user-graduate me-3" aria-hidden="true"></i> Promote Existing
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'promote_offline_student' %}" class="nav-link {% if request.resolver_match.url_name == 'promote_offline_student' %}active{% endif %}">
+                    <i class="fas fa-user-plus me-3" aria-hidden="true"></i> Promote Offline
+                </a>
+            </li>
+
+            <li class="section-label mt-3">Session</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'create_session' %}" class="nav-link {% if request.resolver_match.url_name == 'create_session' %}active{% endif %}">
+                    <i class="fas fa-plus me-3" aria-hidden="true"></i> New Session
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'add_fee_structure' %}" class="nav-link {% if request.resolver_match.url_name == 'add_fee_structure' %}active{% endif %}">
+                    <i class="fas fa-file-invoice-dollar me-3" aria-hidden="true"></i> Fee Structure
+                </a>
+            </li>
+
+            <li class="section-label mt-3">People</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'student_list' %}" class="nav-link {% if request.resolver_match.url_name == 'student_list' %}active{% endif %}">
+                    <i class="fas fa-users me-3" aria-hidden="true"></i> Students
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'teacher_list' %}" class="nav-link {% if request.resolver_match.url_name == 'teacher_list' %}active{% endif %}">
+                    <i class="fas fa-chalkboard-teacher me-3" aria-hidden="true"></i> Teachers
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'staff_list' %}" class="nav-link {% if request.resolver_match.url_name == 'staff_list' %}active{% endif %}">
+                    <i class="fas fa-user-tie me-3" aria-hidden="true"></i> Staff
+                </a>
+            </li>
+
+            <li class="section-label mt-3">Academic</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'syllabus_list' %}" class="nav-link {% if request.resolver_match.url_name == 'syllabus_list' %}active{% endif %}">
+                    <i class="fas fa-book-open me-3" aria-hidden="true"></i> Syllabus
+                </a>
+            </li>
+
+            <li class="section-label mt-3">Operations</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'assets_list' %}" class="nav-link {% if request.resolver_match.url_name == 'assets_list' %}active{% endif %}">
+                    <i class="fas fa-boxes-stacked me-3" aria-hidden="true"></i> Assets
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'expenses_list' %}" class="nav-link {% if request.resolver_match.url_name == 'expenses_list' %}active{% endif %}">
+                    <i class="fas fa-receipt me-3" aria-hidden="true"></i> Expenses
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'transport_list' %}" class="nav-link {% if request.resolver_match.url_name == 'transport_list' %}active{% endif %}">
+                    <i class="fas fa-bus me-3" aria-hidden="true"></i> Transport
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'events_list' %}" class="nav-link {% if request.resolver_match.url_name == 'events_list' or request.resolver_match.url_name == 'events_detail' %}active{% endif %}">
+                    <i class="fas fa-calendar-day me-3" aria-hidden="true"></i> Events
+                </a>
+            </li>
+
+            <li class="section-label mt-3">Reports</li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'analytics' %}" class="nav-link {% if request.resolver_match.url_name == 'analytics' %}active{% endif %}">
+                    <i class="fas fa-chart-pie me-3" aria-hidden="true"></i> Analytics
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'statistics_view' %}" class="nav-link {% if request.resolver_match.url_name == 'statistics_view' %}active{% endif %}">
+                    <i class="fas fa-chart-line me-3" aria-hidden="true"></i> Statistics
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'session_analytics' %}" class="nav-link {% if request.resolver_match.url_name == 'session_analytics' %}active{% endif %}">
+                    <i class="fas fa-layer-group me-3" aria-hidden="true"></i> Session analytics
+                </a>
+            </li>
+            <li class="nav-item mb-1">
+                <a href="{% url 'download_backup' %}" class="nav-link {% if request.resolver_match.url_name == 'download_backup' %}active{% endif %}">
+                    <i class="fas fa-download me-3" aria-hidden="true"></i> Data export
+                </a>
+            </li>
+            {% endif %}
+
+            {% if is_teacher %}
+                <li class="section-label mt-3">Teaching</li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'result_create' %}" class="nav-link {% if request.resolver_match.url_name == 'result_create' %}active{% endif %}">
+                        <i class="fas fa-plus-circle me-3" aria-hidden="true"></i> Add Result
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'subject_list' %}" class="nav-link {% if request.resolver_match.url_name == 'subject_list' or request.resolver_match.url_name == 'subject_create' or request.resolver_match.url_name == 'subject_edit' %}active{% endif %}">
+                        <i class="fas fa-book me-3" aria-hidden="true"></i> Subjects
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'add_syllabus' %}" class="nav-link {% if request.resolver_match.url_name == 'add_syllabus' or request.resolver_match.url_name == 'edit_syllabus' %}active{% endif %}">
+                        <i class="fas fa-upload me-3" aria-hidden="true"></i> Syllabus
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'events_list' %}" class="nav-link {% if request.resolver_match.url_name == 'events_list' or request.resolver_match.url_name == 'events_detail' %}active{% endif %}">
+                        <i class="fas fa-calendar-day me-3" aria-hidden="true"></i> Events
+                    </a>
+                </li>
+            {% endif %}
+
+            {% if is_student %}
+                <li class="section-label mt-3">Student</li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'student_dashboard' %}#results" class="nav-link">
+                        <i class="fas fa-file-alt me-3" aria-hidden="true"></i> My Results
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'generate_results_pdf' %}" class="nav-link {% if request.resolver_match.url_name == 'generate_results_pdf' %}active{% endif %}">
+                        <i class="fas fa-file-arrow-down me-3" aria-hidden="true"></i> Download DMC (PDF)
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'student_dashboard' %}#fees" class="nav-link">
+                        <i class="fas fa-hand-holding-usd me-3" aria-hidden="true"></i> My Fees
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'syllabus_list' %}" class="nav-link {% if request.resolver_match.url_name == 'syllabus_list' %}active{% endif %}">
+                        <i class="fas fa-book-open me-3" aria-hidden="true"></i> Syllabus
+                    </a>
+                </li>
+                <li class="nav-item mb-1">
+                    <a href="{% url 'events_list' %}" class="nav-link {% if request.resolver_match.url_name == 'events_list' or request.resolver_match.url_name == 'events_detail' %}active{% endif %}">
+                        <i class="fas fa-calendar-day me-3" aria-hidden="true"></i> Events
+                    </a>
+                </li>
+            {% endif %}
+
+            <hr class="my-3 mx-3 bg-white opacity-10">
+
+            <li class="nav-item mt-2">
+                <form method="post" action="{% url 'logout' %}" class="px-2">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                        <i class="fas fa-sign-out-alt me-2" aria-hidden="true"></i> Logout
+                    </button>
+                </form>
+            </li>
+        </ul>
+    </div>
+</div>

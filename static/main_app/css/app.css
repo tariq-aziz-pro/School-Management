@@ -1,0 +1,57 @@
+/* PowerLink — shared layout & theme (loaded after Bootstrap) */
+
+[data-bs-theme="dark"] body {
+    background-color: #121212;
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .sidebar {
+    background: #0d1421;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: #1e1e1e;
+    border-color: #2d2d2d;
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .card-header.bg-light {
+    background-color: #252525 !important;
+    border-color: #2d2d2d;
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .text-muted {
+    color: #adb5bd !important;
+}
+
+[data-bs-theme="dark"] .table {
+    --bs-table-bg: transparent;
+    color: #e9ecef;
+}
+
+[data-bs-theme="dark"] .table-light {
+    --bs-table-bg: #2d3339;
+    --bs-table-color: #e9ecef;
+}
+
+.guest-main {
+    max-width: 100%;
+}
+
+.app-message-stack .app-dismissible-msg {
+    word-break: break-word;
+}
+
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1035;
+}
+
+.sidebar-backdrop.show {
+    display: block;
+}

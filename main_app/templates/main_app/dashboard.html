@@ -1,9 +1,10 @@
 {% extends 'main_app/base.html' %}
-{% block title %}Dashboard{% endblock %}
 {% load crispy_forms_tags %}
 
+{% block title %}Dashboard{% endblock %}
+
 {% block breadcrumb %}
-<div class="breadcrumb-bar">
+<div class="mb-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb mb-0">
             <li class="breadcrumb-item active">
@@ -14,719 +15,233 @@
 </div>
 {% endblock %}
 
-{% block sidebar_toggle %}
-<button class="btn btn-sm btn-outline-light" id="sidebarToggle" title="Toggle sidebar">
-    <i class="fas fa-bars"></i>
-</button>
-{% endblock %}
-
-{% block session_badge %}
-{% if active_session %}
-    <span class="badge bg-light text-primary fw-semibold px-3 py-2">
-        <i class="fas fa-calendar-check me-1"></i>
-        {{ active_session.session_name }}
-    </span>
-{% endif %}
-{% endblock %}
-
 {% block content %}
-<style>
-    /* ── Sidebar ─────────────────────────────────────────── */
-    .sidebar {
-        background-color: #1a237e;
-        min-height: calc(100vh - 56px);
-        width: 260px;
-        flex-shrink: 0;
-        overflow-y: auto;
-        transition: all 0.3s ease;
-        padding: 16px 0;
-    }
-    .sidebar-header {
-        padding: 0 16px 16px;
-        border-bottom: 1px solid rgba(255,255,255,0.1);
-        margin-bottom: 8px;
-    }
-    .sidebar-header h6 {
-        color: rgba(255,255,255,0.6);
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin: 0;
-    }
 
-    /* ── Nav links ───────────────────────────────────────── */
-    .sidebar .nav-link {
-        color: rgba(255,255,255,0.75);
-        padding: 10px 16px;
-        border-radius: 6px;
-        margin: 2px 8px;
-        font-size: 0.875rem;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        transition: all 0.2s;
-        text-decoration: none;
-    }
-    .sidebar .nav-link:hover {
-        background: rgba(255,255,255,0.1);
-        color: white;
-    }
-    .sidebar .nav-link.active {
-        background: #1e88e5;
-        color: white;
-        font-weight: 600;
-        box-shadow: 0 2px 8px rgba(30,136,229,0.4);
-    }
-    .sidebar .nav-link.disabled {
-        color: rgba(255,255,255,0.3);
-        cursor: not-allowed;
-        pointer-events: none;
-    }
-    .sidebar .nav-link i {
-        width: 18px;
-        text-align: center;
-        font-size: 0.9rem;
-    }
+<div class="content-area">
+    <h4 class="fw-bold mb-1">
+        Welcome back, {{ request.user.username }} <span class="wave">👋</span>
+    </h4>
+    <p class="text-muted mb-4">
+        {% if request.user.school %}{{ request.user.school.school_name }}{% else %}—{% endif %}
+    </p>
 
-    /* ── Submenu ─────────────────────────────────────────── */
-    .submenu {
-        margin: 0 8px;
-        border-radius: 6px;
-        overflow: hidden;
-        background: rgba(0,0,0,0.2);
-    }
-    .submenu .nav-link {
-        padding: 8px 16px 8px 44px;
-        margin: 0;
-        border-radius: 0;
-        font-size: 0.82rem;
-        color: rgba(255,255,255,0.65);
-    }
-    .submenu .nav-link:hover {
-        background: rgba(255,255,255,0.08);
-        color: white;
-    }
-    .sidebar-section-label {
-        color: rgba(255,255,255,0.35);
-        font-size: 0.68rem;
-        text-transform: uppercase;
-        letter-spacing: 1.2px;
-        padding: 12px 24px 4px;
-        display: block;
-    }
-
-    /* ── Content area ────────────────────────────────────── */
-    .content-area {
-        flex: 1;
-        padding: 24px;
-        min-width: 0;
-        overflow-x: hidden;
-    }
-
-    /* ── Stat cards ──────────────────────────────────────── */
-    .stat-card {
-        border-radius: 12px;
-        border: none;
-        padding: 20px;
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-        transition: transform 0.2s, box-shadow 0.2s;
-        text-decoration: none;
-        color: inherit;
-    }
-    .stat-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-    }
-    .stat-icon {
-        width: 56px;
-        height: 56px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.4rem;
-        flex-shrink: 0;
-    }
-    .stat-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        line-height: 1;
-        margin-bottom: 4px;
-    }
-    .stat-label {
-        font-size: 0.8rem;
-        opacity: 0.75;
-        font-weight: 500;
-    }
-
-    /* ── Session progress card ───────────────────────────── */
-    .session-card {
-        border-radius: 12px;
-        border: none;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-        padding: 20px 24px;
-    }
-    .progress {
-        height: 8px;
-        border-radius: 4px;
-    }
-
-    /* ── Search card ─────────────────────────────────────── */
-    .search-card {
-        border-radius: 12px;
-        border: none;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-    }
-
-    /* ── Results table ───────────────────────────────────── */
-    .results-table th {
-        font-size: 0.8rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        font-weight: 600;
-        color: #6c757d;
-        border-top: none;
-    }
-    .results-table td {
-        vertical-align: middle;
-        font-size: 0.9rem;
-    }
-
-    /* ── Mobile sidebar ──────────────────────────────────── */
-    @media (max-width: 768px) {
-        .sidebar {
-            position: fixed;
-            top: 56px;
-            left: -260px;
-            z-index: 1040;
-            height: calc(100vh - 56px);
-        }
-        .sidebar.open {
-            left: 0;
-            box-shadow: 4px 0 20px rgba(0,0,0,0.3);
-        }
-        .sidebar-overlay {
-            display: none;
-            position: fixed;
-            top: 56px;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1039;
-        }
-        .sidebar-overlay.show { display: block; }
-        .content-area { padding: 16px; }
-    }
-    @media (min-width: 769px) {
-        .sidebar-overlay { display: none !important; }
-    }
-</style>
-
-<!-- Sidebar overlay for mobile tap-to-close -->
-<div class="sidebar-overlay" id="sidebarOverlay"></div>
-
-<div class="d-flex">
-    <!-- ─── Sidebar ───────────────────────────────────────────── -->
-    <div class="sidebar" id="sidebar">
-
-        <span class="sidebar-section-label">Main</span>
-
-        <a class="nav-link {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}"
-           href="{% url 'dashboard' %}">
-            <i class="fas fa-gauge-high"></i> Dashboard
-        </a>
-
-        <a class="nav-link {% if request.resolver_match.url_name == 'admission_form' %}active{% endif %}"
-           href="{% url 'admission_form' %}">
-            <i class="fas fa-user-plus"></i> New Admission
-        </a>
-
-        <a class="nav-link {% if request.resolver_match.url_name == 'monthly_fee' or request.resolver_match.url_name == 'monthly_fee_detail' %}active{% endif %}"
-           href="{% url 'monthly_fee' %}">
-            <i class="fas fa-hand-holding-usd"></i> Monthly Fee
-        </a>
-
-        <span class="sidebar-section-label">Session</span>
-
-        <!-- Session submenu -->
-        <a class="nav-link" data-bs-toggle="collapse" href="#sessionMenu"
-           role="button" aria-expanded="false" aria-controls="sessionMenu">
-            <i class="fas fa-calendar-alt"></i> Session
-            <i class="fas fa-chevron-down ms-auto" style="font-size:0.7rem;"></i>
-        </a>
-        <div class="collapse submenu" id="sessionMenu">
-            <a class="nav-link" href="{% url 'create_session' %}">
-                <i class="fas fa-plus"></i> New Session
-            </a>
-            <a class="nav-link" href="{% url 'search_session' %}">
-                <i class="fas fa-search"></i> View Sessions
-            </a>
-            <a class="nav-link" href="{% url 'add_fee_structure' %}">
-                <i class="fas fa-file-invoice-dollar"></i> Fee Structure
-            </a>
-            <a class="nav-link" href="{% url 'subject_list' %}">
-                <i class="fas fa-book"></i> Subjects
-            </a>
-            <a class="nav-link" href="{% url 'syllabus_list' %}">
-                <i class="fas fa-book-open"></i> Syllabus
+    {% if not session_exists %}
+        <!-- No Session State -->
+        <div class="card border-0 shadow-sm rounded-3 p-5 text-center">
+            <div class="mb-4">
+                <i class="fas fa-calendar-xmark text-warning" style="font-size: 4rem;"></i>
+            </div>
+            <h5 class="fw-bold">No Academic Session Found</h5>
+            <p class="text-muted mb-4">Create an academic session to start managing students, fees, and reports.</p>
+            <a href="{% url 'create_session' %}" class="btn btn-primary btn-lg">
+                <i class="fas fa-plus me-2"></i> Create First Session
             </a>
         </div>
+    {% else %}
 
-        <span class="sidebar-section-label">People</span>
-
-        <!-- Members submenu -->
-        <a class="nav-link" data-bs-toggle="collapse" href="#membersMenu"
-           role="button" aria-expanded="false" aria-controls="membersMenu">
-            <i class="fas fa-users"></i> Members
-            <i class="fas fa-chevron-down ms-auto" style="font-size:0.7rem;"></i>
-        </a>
-        <div class="collapse submenu" id="membersMenu">
-            <a class="nav-link" href="{% url 'student_user_create' %}">
-                <i class="fas fa-user"></i> Create Student Account
-            </a>
-            <a class="nav-link" href="{% url 'student_list' %}">
-                <i class="fas fa-users"></i> Student Accounts
-            </a>
-            <a class="nav-link" href="{% url 'teacher_create' %}">
-                <i class="fas fa-chalkboard-teacher"></i> Add Teacher
-            </a>
-            <a class="nav-link" href="{% url 'teacher_list' %}">
-                <i class="fas fa-list"></i> Teachers
-            </a>
-            <a class="nav-link" href="{% url 'staff_list' %}">
-                <i class="fas fa-user-tie"></i> Staff
-            </a>
-        </div>
-
-        <!-- Students submenu -->
-        <a class="nav-link" data-bs-toggle="collapse" href="#studentsMenu"
-           role="button" aria-expanded="false" aria-controls="studentsMenu">
-            <i class="fas fa-user-graduate"></i> Promotions
-            <i class="fas fa-chevron-down ms-auto" style="font-size:0.7rem;"></i>
-        </a>
-        <div class="collapse submenu" id="studentsMenu">
-            <a class="nav-link" href="{% url 'promote_offline_student' %}">
-                <i class="fas fa-user-plus"></i> Promote Offline
-            </a>
-            <a class="nav-link" href="{% url 'promote_existing_students' %}">
-                <i class="fas fa-user-check"></i> Promote Existing
-            </a>
-        </div>
-
-        <span class="sidebar-section-label">School</span>
-
-        <a class="nav-link {% if not session_exists %}disabled{% endif %} {% if request.resolver_match.url_name == 'assets_list' %}active{% endif %}"
-           href="{% url 'assets_list' %}"
-           {% if not session_exists %}data-bs-toggle="tooltip" title="Create a session first"{% endif %}>
-            <i class="fas fa-boxes-stacked"></i> Assets
-        </a>
-
-        <a class="nav-link {% if not session_exists %}disabled{% endif %} {% if request.resolver_match.url_name == 'expenses_list' %}active{% endif %}"
-           href="{% url 'expenses_list' %}"
-           {% if not session_exists %}data-bs-toggle="tooltip" title="Create a session first"{% endif %}>
-            <i class="fas fa-receipt"></i> Expenses
-        </a>
-
-        <a class="nav-link {% if not session_exists %}disabled{% endif %} {% if request.resolver_match.url_name == 'transport_list' %}active{% endif %}"
-           href="{% url 'transport_list' %}"
-           {% if not session_exists %}data-bs-toggle="tooltip" title="Create a session first"{% endif %}>
-            <i class="fas fa-bus"></i> Transport
-        </a>
-
-        <a class="nav-link {% if not session_exists %}disabled{% endif %} {% if request.resolver_match.url_name == 'events_list' %}active{% endif %}"
-           href="{% url 'events_list' %}"
-           {% if not session_exists %}data-bs-toggle="tooltip" title="Create a session first"{% endif %}>
-            <i class="fas fa-calendar-day"></i> Events
-        </a>
-
-        <span class="sidebar-section-label">Reports</span>
-
-        <a class="nav-link {% if not session_exists %}disabled{% endif %} {% if request.resolver_match.url_name == 'analytics' %}active{% endif %}"
-           href="{% url 'analytics' %}"
-           {% if not session_exists %}data-bs-toggle="tooltip" title="Create a session first"{% endif %}>
-            <i class="fas fa-chart-bar"></i> Analytics
-        </a>
-
-        <a class="nav-link {% if request.resolver_match.url_name == 'statistics_view' %}active{% endif %}"
-           href="{% url 'statistics_view' %}">
-            <i class="fas fa-chart-line"></i> Statistics
-        </a>
-
-        <a class="nav-link {% if request.resolver_match.url_name == 'session_analytics' %}active{% endif %}"
-           href="{% url 'session_analytics' %}">
-            <i class="fas fa-chart-pie"></i> Session Analysis
-        </a>
-
-        <span class="sidebar-section-label">Data</span>
-
-        <!-- Backup submenu -->
-        <a class="nav-link" data-bs-toggle="collapse" href="#dataMenu"
-           role="button" aria-expanded="false" aria-controls="dataMenu">
-            <i class="fas fa-database"></i> Backup Data
-            <i class="fas fa-chevron-down ms-auto" style="font-size:0.7rem;"></i>
-        </a>
-        <div class="collapse submenu px-3 py-2" id="dataMenu">
-            <form action="{% url 'download_backup' %}" method="post">
-                {% csrf_token %}
-                <input type="hidden" name="session" value="{{ active_session.id }}">
-                <select name="format" class="form-select form-select-sm mb-2">
-                    <option value="excel">Excel (.xlsx)</option>
-                    <option value="csv">CSV (Zip)</option>
-                </select>
-                <button type="submit" name="preview" value="1"
-                    class="btn btn-outline-light btn-sm w-100"
-                    id="backupBtn">
-                    <i class="fas fa-eye me-1"></i> Preview Backup
-                </button>
-            </form>
-        </div>
-
-    </div>
-    <!-- ─── End Sidebar ───────────────────────────────────────── -->
-
-    <!-- ─── Main Content ──────────────────────────────────────── -->
-    <div class="content-area" id="mainContent">
-
-        <h4 class="fw-bold mb-1">
-            Welcome back, {{ request.user.username }}
-            <span class="wave">👋</span>
-        </h4>
-        <p class="text-muted mb-4" style="font-size:0.875rem;">
-            {{ request.user.school.school_name }}
-        </p>
-
-        {% if not session_exists %}
-            <!-- ── No session state ── -->
-            <div class="card border-0 shadow-sm rounded-3 p-4 text-center">
-                <div class="mb-3">
-                    <i class="fas fa-calendar-xmark text-warning" style="font-size:3rem;"></i>
+        <!-- Statistics Cards -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="card stat-card h-100 text-white" style="background: linear-gradient(135deg, #1e88e5, #42a5f5);">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <i class="fas fa-users fa-2x"></i>
+                        </div>
+                        <div>
+                            <h3 class="mb-0 fw-bold">{{ total_students }}</h3>
+                            <small>Total Students</small>
+                        </div>
+                    </div>
                 </div>
-                <h5 class="fw-bold">No Academic Session Found</h5>
-                <p class="text-muted">Create an academic session to start managing students, fees, and more.</p>
-                <a href="{% url 'create_session' %}" class="btn btn-primary">
-                    <i class="fas fa-plus me-2"></i> Create Session
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="card stat-card h-100 text-white" style="background: linear-gradient(135deg, #43a047, #66bb6a);">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <i class="fas fa-user-plus fa-2x"></i>
+                        </div>
+                        <div>
+                            <h3 class="mb-0 fw-bold">{{ new_admissions }}</h3>
+                            <small>New Admissions</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="card stat-card h-100 text-white" style="background: linear-gradient(135deg, #8e24aa, #ab47bc);">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <i class="fas fa-user-graduate fa-2x"></i>
+                        </div>
+                        <div>
+                            <h3 class="mb-0 fw-bold">{{ promoted_students }}</h3>
+                            <small>Promoted</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="card stat-card h-100 text-white" style="background: linear-gradient(135deg, #e53935, #ef5350);">
+                    <div class="card-body d-flex align-items-center">
+                        <div class="flex-shrink-0 me-3">
+                            <i class="fas fa-money-bill-wave fa-2x"></i>
+                        </div>
+                        <div>
+                            <h3 class="mb-0 fw-bold">Rs {{ total_balance|floatformat:0 }}</h3>
+                            <small>Outstanding Balance</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <a href="{% url 'admission_form' %}" class="btn btn-outline-primary w-100 py-3">
+                    <i class="fas fa-user-plus d-block mb-2 fa-2x"></i>
+                    New Admission
                 </a>
             </div>
-
-        {% else %}
-
-            <!-- ── Stat cards ─────────────────────────────────── -->
-            <div class="row g-3 mb-4">
-
-                <div class="col-6 col-md-3">
-                    <div class="stat-card" style="background:linear-gradient(135deg,#1e88e5,#42a5f5);color:white;">
-                        <div class="stat-icon" style="background:rgba(255,255,255,0.2);">
-                            <i class="fas fa-users"></i>
-                        </div>
-                        <div>
-                            <div class="stat-value">{{ total_students }}</div>
-                            <div class="stat-label">Total Students</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-md-3">
-                    <div class="stat-card" style="background:linear-gradient(135deg,#43a047,#66bb6a);color:white;">
-                        <div class="stat-icon" style="background:rgba(255,255,255,0.2);">
-                            <i class="fas fa-user-plus"></i>
-                        </div>
-                        <div>
-                            <div class="stat-value">{{ new_admissions }}</div>
-                            <div class="stat-label">New Admissions</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-md-3">
-                    <div class="stat-card" style="background:linear-gradient(135deg,#8e24aa,#ab47bc);color:white;">
-                        <div class="stat-icon" style="background:rgba(255,255,255,0.2);">
-                            <i class="fas fa-user-graduate"></i>
-                        </div>
-                        <div>
-                            <div class="stat-value">{{ promoted_students }}</div>
-                            <div class="stat-label">Promoted</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="col-6 col-md-3">
-                    <div class="stat-card" style="background:linear-gradient(135deg,#e53935,#ef5350);color:white;">
-                        <div class="stat-icon" style="background:rgba(255,255,255,0.2);">
-                            <i class="fas fa-money-bill-wave"></i>
-                        </div>
-                        <div>
-                            <!-- ✅ total_balance now passed from view -->
-                            <div class="stat-value" style="font-size:1.3rem;">
-                                Rs {{ total_balance|floatformat:0 }}
-                            </div>
-                            <div class="stat-label">Outstanding Balance</div>
-                        </div>
-                    </div>
-                </div>
-
+            <div class="col-6 col-md-3">
+                <a href="{% url 'monthly_fee' %}" class="btn btn-outline-success w-100 py-3">
+                    <i class="fas fa-hand-holding-usd d-block mb-2 fa-2x"></i>
+                    Collect Fee
+                </a>
             </div>
-
-            <!-- ── Quick actions row ──────────────────────────── -->
-            <div class="row g-3 mb-4">
-                <div class="col-6 col-md-3">
-                    <a href="{% url 'admission_form' %}" class="btn btn-outline-primary w-100 py-2">
-                        <i class="fas fa-user-plus d-block mb-1" style="font-size:1.2rem;"></i>
-                        <span style="font-size:0.8rem;">New Admission</span>
-                    </a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="{% url 'monthly_fee' %}" class="btn btn-outline-success w-100 py-2">
-                        <i class="fas fa-hand-holding-usd d-block mb-1" style="font-size:1.2rem;"></i>
-                        <span style="font-size:0.8rem;">Collect Fee</span>
-                    </a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="{% url 'promote_existing_students' %}" class="btn btn-outline-warning w-100 py-2">
-                        <i class="fas fa-user-graduate d-block mb-1" style="font-size:1.2rem;"></i>
-                        <span style="font-size:0.8rem;">Promote Students</span>
-                    </a>
-                </div>
-                <div class="col-6 col-md-3">
-                    <a href="{% url 'analytics' %}" class="btn btn-outline-info w-100 py-2">
-                        <i class="fas fa-chart-bar d-block mb-1" style="font-size:1.2rem;"></i>
-                        <span style="font-size:0.8rem;">Analytics</span>
-                    </a>
-                </div>
+            <div class="col-6 col-md-3">
+                <a href="{% url 'promote_existing_students' %}" class="btn btn-outline-warning w-100 py-3">
+                    <i class="fas fa-user-graduate d-block mb-2 fa-2x"></i>
+                    Promote Students
+                </a>
             </div>
+            <div class="col-6 col-md-3">
+                <a href="{% url 'analytics' %}" class="btn btn-outline-info w-100 py-3">
+                    <i class="fas fa-chart-bar d-block mb-2 fa-2x"></i>
+                    Analytics
+                </a>
+            </div>
+        </div>
 
-            <!-- ── Session progress card ──────────────────────── -->
-            {% if active_session %}
-            <div class="session-card card mb-4">
-                <div class="d-flex justify-content-between align-items-start mb-3">
+        <!-- Active Session Info -->
+        {% if active_session %}
+        <div class="card mb-4 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <h6 class="fw-bold mb-0">
+                        <h5 class="fw-bold">
                             <i class="fas fa-calendar-check text-primary me-2"></i>
                             {{ active_session.session_name }}
-                        </h6>
+                        </h5>
                         <small class="text-muted">
-                            {{ active_session.start_date|date:"d M Y" }} —
-                            {{ active_session.end_date|date:"d M Y" }}
+                            {{ active_session.start_date|date:"d M Y" }} — {{ active_session.end_date|date:"d M Y" }}
                         </small>
                     </div>
-                    <span class="badge bg-success">Active</span>
+                    <span class="badge bg-success fs-6">Active</span>
                 </div>
-                <div class="d-flex justify-content-between mb-1" style="font-size:0.8rem;">
-                    <span class="text-muted">Session Progress</span>
-                    <span class="fw-semibold text-primary" id="sessionPercent">Calculating...</span>
-                </div>
-                <div class="progress mb-2">
-                    <div class="progress-bar bg-primary" id="sessionProgressBar"
-                         role="progressbar" style="width:0%"></div>
-                </div>
-                <div class="row text-center mt-2" style="font-size:0.8rem;">
+
+                <div class="row text-center mt-4">
                     <div class="col-4">
-                        <div class="fw-bold text-primary">{{ total_classes }}</div>
-                        <div class="text-muted">Classes</div>
+                        <div class="fw-bold text-primary fs-4">{{ total_classes }}</div>
+                        <small class="text-muted">Classes</small>
                     </div>
                     <div class="col-4">
-                        <div class="fw-bold text-primary">{{ total_sections }}</div>
-                        <div class="text-muted">Sections</div>
+                        <div class="fw-bold text-primary fs-4">{{ total_sections }}</div>
+                        <small class="text-muted">Sections</small>
                     </div>
                     <div class="col-4">
-                        <div class="fw-bold text-primary" id="daysLeft">—</div>
-                        <div class="text-muted">Days Left</div>
+                        <div class="fw-bold text-primary fs-4" id="daysLeft">—</div>
+                        <small class="text-muted">Days Left</small>
                     </div>
                 </div>
             </div>
-            {% endif %}
-
-            <!-- ── Search card ────────────────────────────────── -->
-            <div class="search-card card mb-4">
-                <div class="card-header bg-transparent border-bottom py-3">
-                    <h6 class="fw-bold mb-0">
-                        <i class="fas fa-search me-2 text-primary"></i>
-                        Search Students
-                    </h6>
-                </div>
-                <div class="card-body">
-                    <form method="get" id="searchForm">
-                        <div class="row g-2">
-                            <div class="col-md-3">
-                                <select name="search_type" class="form-select form-select-sm">
-                                    <option value="">Search by...</option>
-                                    <option value="student_id"
-                                        {% if search_type == 'student_id' %}selected{% endif %}>
-                                        Student ID
-                                    </option>
-                                    <option value="contact"
-                                        {% if search_type == 'contact' %}selected{% endif %}>
-                                        Contact
-                                    </option>
-                                    <option value="father_name"
-                                        {% if search_type == 'father_name' %}selected{% endif %}>
-                                        Father / Guardian Name
-                                    </option>
-                                </select>
-                            </div>
-                            <div class="col-md-5">
-                                <input type="text" name="search_value"
-                                    value="{{ search_value|default:'' }}"
-                                    class="form-control form-control-sm"
-                                    placeholder="Enter search value...">
-                            </div>
-                            <div class="col-md-2">
-                                <button type="submit" class="btn btn-primary btn-sm w-100">
-                                    <i class="fas fa-search me-1"></i> Search
-                                </button>
-                            </div>
-                            <div class="col-md-2">
-                                <!-- ✅ Navigates to ?clear_search=1 to clear server session -->
-                                <a href="?clear_search=1"
-                                   class="btn btn-outline-secondary btn-sm w-100">
-                                    <i class="fas fa-xmark me-1"></i> Clear
-                                </a>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- ── Search results ─────────────────────────────── -->
-            {% if search_results %}
-                <div class="card border-0 shadow-sm rounded-3 mb-4">
-                    <div class="card-header bg-transparent border-bottom py-3 d-flex justify-content-between align-items-center">
-                        <h6 class="fw-bold mb-0">
-                            <i class="fas fa-list me-2 text-primary"></i>
-                            Search Results
-                        </h6>
-                        <span class="badge bg-primary">
-                            {{ search_results|length }} found
-                        </span>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table results-table mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Student</th>
-                                        <th>Class</th>
-                                        <th>Section</th>
-                                        <th>Father / Guardian</th>
-                                        <th class="text-end">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for admission in search_results %}
-                                        <tr>
-                                            <td>
-                                                <div class="fw-semibold">
-                                                    {{ admission.student.first_name }}
-                                                    {{ admission.student.last_name }}
-                                                </div>
-                                                <small class="text-muted">
-                                                    {{ admission.student.student_id }}
-                                                </small>
-                                            </td>
-                                            <td>{{ admission.class_name|default:"N/A" }}</td>
-                                            <td>{{ admission.section|default:"N/A" }}</td>
-                                            <td>{{ admission.student.father_guardian_name|default:"N/A" }}</td>
-                                            <td class="text-end">
-                                                <a href="{% url 'edit_student' admission.student.student_id %}"
-                                                   class="btn btn-sm btn-outline-warning me-1">
-                                                    <i class="fas fa-pen"></i>
-                                                </a>
-                                                <a href="{% url 'monthly_fee_detail' admission.student.student_id %}"
-                                                   class="btn btn-sm btn-outline-primary">
-                                                    <i class="fas fa-hand-holding-usd"></i>
-                                                </a>
-                                            </td>
-                                        </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            {% elif search_value %}
-                <!-- ✅ Empty state when search returns nothing -->
-                <div class="text-center py-5">
-                    <i class="fas fa-user-slash text-muted mb-3" style="font-size:2.5rem;"></i>
-                    <p class="text-muted">No students found for "<strong>{{ search_value }}</strong>"</p>
-                </div>
-            {% endif %}
-
+        </div>
         {% endif %}
-    </div>
-    <!-- ─── End Main Content ──────────────────────────────────── -->
 
+        <!-- Search -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-light">
+                <h6 class="fw-bold mb-0"><i class="fas fa-search me-2"></i> Quick Student Search</h6>
+            </div>
+            <div class="card-body">
+                <form method="get" class="row g-2">
+                    <div class="col-md-3">
+                        <select name="search_type" class="form-select">
+                            <option value="">Search by...</option>
+                            <option value="student_id" {% if search_type == 'student_id' %}selected{% endif %}>Student ID</option>
+                            <option value="contact" {% if search_type == 'contact' %}selected{% endif %}>Contact</option>
+                            <option value="father_name" {% if search_type == 'father_name' %}selected{% endif %}>Father Name</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <input type="text" name="search_value" value="{{ search_value|default:'' }}" 
+                               class="form-control" placeholder="Enter value to search...">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="submit" class="btn btn-primary w-100">Search</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Search Results -->
+        {% if search_results %}
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="fw-bold mb-0">Search Results ({{ search_results|length }})</h6>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Student</th>
+                            <th>Class - Section</th>
+                            <th>Father/Guardian</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for admission in search_results %}
+                        <tr>
+                            <td>
+                                <strong>{{ admission.student.first_name }} {{ admission.student.last_name }}</strong><br>
+                                <small class="text-muted">{{ admission.student.student_id }}</small>
+                            </td>
+                            <td>{{ admission.class_name }} - {{ admission.section|default:"—" }}</td>
+                            <td>{{ admission.student.father_guardian_name|default:"—" }}</td>
+                            <td class="text-end">
+                                <a href="{% url 'edit_student' admission.student.student_id %}" class="btn btn-sm btn-warning">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <a href="{% url 'monthly_fee_detail' admission.student.student_id %}" class="btn btn-sm btn-primary">
+                                    <i class="fas fa-money-bill"></i>
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+    {% endif %}
 </div>
 
 {% endblock %}
 
 {% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-
-    // ── Sidebar toggle ─────────────────────────────────────────────
-    const sidebarToggle  = document.getElementById('sidebarToggle');
-    const sidebar        = document.getElementById('sidebar');
-    const overlay        = document.getElementById('sidebarOverlay');
-
-    function openSidebar() {
-        sidebar.classList.add('open');
-        overlay.classList.add('show');
-    }
-    function closeSidebar() {
-        sidebar.classList.remove('open');
-        overlay.classList.remove('show');
-    }
-
-    if (sidebarToggle) {
-        sidebarToggle.addEventListener('click', function () {
-            sidebar.classList.contains('open') ? closeSidebar() : openSidebar();
-        });
-    }
-    // ✅ Tap overlay to close sidebar on mobile
-    overlay.addEventListener('click', closeSidebar);
-
-    // ── Keep submenu open if active child is inside ────────────────
-    document.querySelectorAll('.submenu').forEach(function (submenu) {
-        if (submenu.querySelector('.nav-link.active')) {
-            new bootstrap.Collapse(submenu, { toggle: false }).show();
-            const trigger = document.querySelector('[href="#' + submenu.id + '"]');
-            if (trigger) trigger.setAttribute('aria-expanded', 'true');
-        }
-    });
-
-    // ── Session progress bar ───────────────────────────────────────
+    // Session Days Left Calculation
     {% if active_session %}
-    const start   = new Date("{{ active_session.start_date|date:'Y-m-d' }}");
-    const end     = new Date("{{ active_session.end_date|date:'Y-m-d' }}");
-    const today   = new Date();
-    const total   = end - start;
-    const elapsed = today - start;
-    const pct     = Math.min(100, Math.max(0, Math.round((elapsed / total) * 100)));
+    const start = new Date("{{ active_session.start_date|date:'Y-m-d' }}");
+    const end = new Date("{{ active_session.end_date|date:'Y-m-d' }}");
+    const today = new Date();
     const daysLeft = Math.max(0, Math.round((end - today) / (1000 * 60 * 60 * 24)));
-
-    document.getElementById('sessionProgressBar').style.width = pct + '%';
-    document.getElementById('sessionPercent').textContent     = pct + '% complete';
-    document.getElementById('daysLeft').textContent           = daysLeft;
+    document.getElementById('daysLeft').textContent = daysLeft;
     {% endif %}
-
-    // ── Backup button loading state ────────────────────────────────
-    const backupBtn = document.getElementById('backupBtn');
-    if (backupBtn) {
-        backupBtn.closest('form').addEventListener('submit', function () {
-            backupBtn.disabled = true;
-            backupBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Loading...';
-        });
-    }
-
-    // ── Tooltips on disabled links ─────────────────────────────────
-    document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
-        new bootstrap.Tooltip(el);
-    });
-
-});
 </script>
 {% endblock %}
-

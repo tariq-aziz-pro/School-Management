@@ -1,68 +1,44 @@
 {% extends 'main_app/base.html' %}
-{% load static %}
-{% load crispy_forms_tags %}
+
+{% block title %}Admission Successful{% endblock %}
 
 {% block content %}
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-
-<div class="container mt-5">
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-success alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
-    <h2 class="mb-4 text-success">Admission Successful!</h2>
-
-    <div class="text-end mb-3">
-        {% if student.image and student.image.url %}
-            <img src="{{ student.image.url }}" alt="Student Image" class="img-thumbnail" style="max-width: 150px; max-height: 150px;">
-        {% else %}
-            <p class="text-muted">No image uploaded</p>
-        {% endif %}
+<div class="content-area">
+    <div class="text-center mb-5">
+        <h2 class="text-success fw-bold"><i class="fas fa-check-circle fa-2x"></i></h2>
+        <h3 class="text-success">Admission Successful!</h3>
+        <p class="lead">Student has been successfully admitted.</p>
     </div>
 
-    <div class="card shadow-sm">
+    <div class="card shadow-sm mx-auto" style="max-width: 700px;">
         <div class="card-body">
-            <h5 class="card-title">Student Information</h5>
-            <p><strong>Student ID:</strong> {{ student.student_id }}</p>
-            <p><strong>Student Name:</strong> {{ student.first_name }} {{ student.last_name }}</p>
-            <p><strong>Father/Guardian Name:</strong> {{ student.father_guardian_name }}</p>
-            <p><strong>Class:</strong> {{ admission.class_name }}</p>
-            <p><strong>Section:</strong> {{ admission.section|default:"N/A" }}</p>
-            <p><strong>Roll Number:</strong> {{ admission.roll_number }}</p>
+            {% if student.image %}
+                <div class="text-center mb-4">
+                    <img src="{{ student.image.url }}" alt="Student" class="img-thumbnail" style="max-height: 180px;">
+                </div>
+            {% endif %}
 
-            <h6 class="mt-4">Fee Details</h6>
-            <ul class="list-group">
-                <li class="list-group-item"><strong>Admission Fee:</strong> Rs{{ admission.admission_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Tuition Fee:</strong> Rs{{ admission.tuition_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Exam Fee:</strong> Rs{{ admission.exam_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Book Fee:</strong> Rs{{ admission.book_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Uniform Fee:</strong> Rs{{ admission.uniform_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Other Fee:</strong> Rs{{ admission.other_fee|floatformat:2|default:"0.00" }}</li>
-                <li class="list-group-item"><strong>Promotion Fee:</strong> Rs{{ admission.promotion_fee|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Transport Fee:</strong> Rs{{ admission.transport_fee|floatformat:2|default:"0.00" }}</li>
-                <li class="list-group-item"><strong>Discount:</strong> Rs{{ admission.discount|floatformat:2 }}</li>
-            </ul>
+            <h5>Student Details</h5>
+            <p><strong>ID:</strong> {{ student.student_id }}</p>
+            <p><strong>Name:</strong> {{ student.first_name }} {{ student.last_name }}</p>
+            <p><strong>Father/Guardian:</strong> {{ student.father_guardian_name }}</p>
+            <p><strong>Class:</strong> {{ admission.class_name }} - {{ admission.section }}</p>
+            <p><strong>Roll No:</strong> {{ admission.roll_number }}</p>
 
-            <h6 class="mt-4">Calculations</h6>
-            <ul class="list-group">
-                <li class="list-group-item"><strong>Total Dues:</strong> Rs{{ admission.total_dues|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Received:</strong> Rs{{ admission.received|floatformat:2 }}</li>
-                <li class="list-group-item"><strong>Balance:</strong> Rs{{ admission.balance|floatformat:2 }}</li>
-            </ul>
+            <hr>
+            <h6>Fee Summary</h6>
+            <p><strong>Total Dues:</strong> Rs {{ admission.total_dues|floatformat:2 }}</p>
+            <p><strong>Received:</strong> Rs {{ admission.received|floatformat:2 }}</p>
+            <p><strong>Balance:</strong> Rs {{ admission.balance|floatformat:2 }}</p>
 
             <div class="mt-4">
-                <a href="{% url 'generate_pdf' student_id=student.student_id %}" class="btn btn-primary">Download PDF Report</a>
-                <a href="{% url 'admission_form' %}" class="btn btn-secondary">Add Other Student</a>
-                <a href="{% url 'dashboard' %}" class="btn btn-info">Dashboard</a>
+                <a href="{% url 'generate_pdf' student_id=student.student_id %}" class="btn btn-primary">
+                    <i class="fas fa-download"></i> Download PDF
+                </a>
+                <a href="{% url 'admission_form' %}" class="btn btn-outline-primary">Admit Another Student</a>
+                <a href="{% url 'dashboard' %}" class="btn btn-secondary">Go to Dashboard</a>
             </div>
         </div>
     </div>
 </div>
-
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 {% endblock %}

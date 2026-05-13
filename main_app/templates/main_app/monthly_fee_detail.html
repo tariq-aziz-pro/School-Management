@@ -1,146 +1,156 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-{% load static %}
+
+{% block title %}Monthly Fee - {{ student.student.first_name }} {{ student.student.last_name }}{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'monthly_fee' %}">Monthly Fee</a></li>
+            <li class="breadcrumb-item active">{{ student.student.first_name }} {{ student.student.last_name }}</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2>Monthly Fee Detail for {{ student.student.first_name }} {{ student.student.last_name }}</h2>
+
+<div class="content-area">
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
+        <div>
+            <h4 class="fw-bold mb-1">
+                {{ student.student.first_name }} {{ student.student.last_name }}
+            </h4>
+            <p class="text-muted mb-0">
+                {{ student.class_name }} - {{ student.section }} | 
+                ID: <strong>{{ student.student.student_id }}</strong>
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'monthly_fee' %}" class="btn btn-secondary">
+                <i class="fas fa-arrow-left"></i> Back to Search
+            </a>
+        </div>
+    </div>
+
     {% if active_session %}
-        <p class="text-primary">Current Session: {{ active_session.session_name }}</p>
+        <p class="text-primary mb-4">
+            <i class="fas fa-calendar-check"></i> 
+            Academic Session: <strong>{{ active_session.session_name }}</strong>
+        </p>
     {% endif %}
+
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
 
-    <div class="mb-3">
-        <a href="{% url 'monthly_fee' %}" class="btn btn-secondary">Go Back</a>
-        <a href="{% url 'dashboard' %}" class="btn btn-primary">Go to Dashboard</a>
-    </div>
-
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>Month</th>
-                <th>Year</th>
-                <th>Previous Balance</th>
-                <th>Monthly Fee</th>
-                <th>Transport Fee</th>
-                <th>Total Dues</th>
-                <th>Received</th>
-                <th>Current Balance</th>
-                <th>Reviewed By</th>
-                <th>Status</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for data in month_data %}
-                <tr>
-                    <td>{{ data.month }}</td>
-                    <td>{{ data.year }}</td>
+    <!-- Months Grid -->
+    <div class="row g-4">
+        {% for data in month_data %}
+        <div class="col-lg-6 col-xl-4">
+            <div class="card h-100 shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0 fw-semibold">
+                        {{ data.month }} {{ data.year }}
+                        <span class="badge float-end bg-{% if data.status == 'Paid' %}success{% else %}warning{% endif %}">
+                            {{ data.status }}
+                        </span>
+                    </h5>
+                </div>
+                <div class="card-body">
                     {% if data.fee %}
-                        <td>Rs {{ data.fee.previous_balance|floatformat:2 }}</td>
-                        <td>Rs {{ data.fee.monthly_fee|floatformat:2 }}</td>
-                        <td>Rs {{ data.fee.transport_fee|floatformat:2 }}</td>
-                        <td>Rs {{ data.fee.total_dues|floatformat:2 }}</td>
-                        <td>
-                            <input type="number" value="{{ data.fee.received|floatformat:2 }}" class="form-control" readonly {% if data.disabled %}disabled{% endif %}>
-                        </td>
-                        <td>
-                            <input type="text" value="{{ data.fee.current_balance|floatformat:2 }}" class="form-control current-balance" readonly>
-                        </td>
-                        <td>
-                            <input type="text" value="{{ data.fee.reviewed_by|default:'Not reviewed' }}" class="form-control" readonly {% if data.disabled %}disabled{% endif %}>
-                        </td>
-                        <td>{{ data.status }}</td>
-                        <td>Payment Recorded</td>
+                        <!-- Already Paid -->
+                        <div class="row text-center mb-3">
+                            <div class="col-6">
+                                <small class="text-muted">Total Dues</small><br>
+                                <strong>Rs {{ data.fee.total_dues|floatformat:2 }}</strong>
+                            </div>
+                            <div class="col-6">
+                                <small class="text-muted">Received</small><br>
+                                <strong class="text-success">Rs {{ data.fee.received|floatformat:2 }}</strong>
+                            </div>
+                        </div>
+                        <div class="alert alert-success py-2 text-center">
+                            <strong>Payment Recorded</strong>
+                        </div>
                     {% elif data.form %}
-                        <td>Rs {{ data.form.previous_balance.value|floatformat:2|default:"0.00" }}</td>
-                        <td>Rs {{ data.form.monthly_fee.value|floatformat:2|default:"0.00" }}</td>
-                        <td>Rs {{ data.form.transport_fee.value|floatformat:2|default:"0.00" }}</td>
-                        <td>Rs {{ data.form.total_dues.value|floatformat:2|default:"0.00" }}</td>
-                        <td>
-                            <form method="post" action="{% url 'monthly_fee_detail' student.student.student_id %}" class="d-inline">
-                                {% csrf_token %}
-                                {{ data.form.non_field_errors }}
-                                {% for field in data.form.hidden_fields %}
-                                    {{ field }}
-                                    {% if field.errors %}
-                                        <div class="text-danger">{{ field.errors }}</div>
-                                    {% endif %}
-                                {% endfor %}
-                                <input type="number" name="received" id="id_received_{{ data.month|slugify }}" value="{{ data.form.received.value|default:'0' }}" class="form-control received-input" step="0.01">
+                        <!-- Payment Form -->
+                        <form method="post" action="{% url 'monthly_fee_detail' student.student.student_id %}">
+                            {% csrf_token %}
+                            {{ data.form.non_field_errors }}
+                            {% for hidden in data.form.hidden_fields %}
+                                {{ hidden }}
+                            {% endfor %}
+
+                            <div class="mb-3">
+                                <label class="form-label">Previous Balance</label>
+                                <input type="text" class="form-control bg-light" 
+                                       value="Rs {{ data.form.previous_balance.value|floatformat:2 }}" readonly>
+                            </div>
+
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label class="form-label">Monthly Fee</label>
+                                    <input type="text" class="form-control bg-light" 
+                                           value="Rs {{ data.form.monthly_fee.value|floatformat:2 }}" readonly>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">Transport Fee</label>
+                                    <input type="text" class="form-control bg-light" 
+                                           value="Rs {{ data.form.transport_fee.value|floatformat:2 }}" readonly>
+                                </div>
+                            </div>
+
+                            <div class="mb-3 mt-3">
+                                <label class="form-label fw-semibold">Total Dues</label>
+                                <input type="text" class="form-control bg-light fw-bold" 
+                                       value="Rs {{ data.form.total_dues.value|floatformat:2 }}" readonly>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold text-primary">Amount Received</label>
+                                <input type="number" name="received" step="0.01" 
+                                       value="{{ data.form.received.value|default:'0.00' }}" 
+                                       class="form-control form-control-lg received-input" required>
                                 {% if data.form.received.errors %}
-                                    <div class="text-danger">{{ data.form.received.errors }}</div>
+                                    <div class="text-danger small">{{ data.form.received.errors }}</div>
                                 {% endif %}
-                        </td>
-                        <td>
-                            <input type="text" id="currentBalance_{{ data.month|slugify }}" value="{{ data.form.total_dues.value|floatformat:2|default:'0.00' }}" readonly class="form-control current-balance">
-                        </td>
-                        <td>
-                            <input type="text" name="reviewed_by" id="id_reviewed_by_{{ data.month|slugify }}" value="{{ data.form.reviewed_by.value|default:'' }}" class="form-control">
-                            {% if data.form.reviewed_by.errors %}
-                                <div class="text-danger">{{ data.form.reviewed_by.errors }}</div>
-                            {% endif %}
-                        </td>
-                        <td>{{ data.status }}</td>
-                        <td>
-                            <button type="submit" class="btn btn-success">Save Payment</button>
-                            </form>
-                        </td>
-                    {% else %}
-                        <td>Rs 0.00</td>
-                        <td>Rs 0.00</td>
-                        <td>Rs 0.00</td>
-                        <td>Rs 0.00</td>
-                        <td>
-                            <input type="number" value="0.00" class="form-control" readonly>
-                        </td>
-                        <td>
-                            <input type="text" value="0.00" class="form-control current-balance" readonly>
-                        </td>
-                        <td>
-                            <input type="text" value="Not reviewed" class="form-control" readonly>
-                        </td>
-                        <td>{{ data.status }}</td>
-                        <td>No Action</td>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Reviewed By</label>
+                                <input type="text" name="reviewed_by" 
+                                       value="{{ data.form.reviewed_by.value|default:request.user.username }}" 
+                                       class="form-control">
+                            </div>
+
+                            <button type="submit" class="btn btn-success w-100 py-3">
+                                <i class="fas fa-save"></i> Save Payment
+                            </button>
+                        </form>
                     {% endif %}
-                </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 </div>
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js" integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4=" crossorigin="anonymous"></script>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-    $(document).ready(function() {
-        function updateCurrentBalance($row) {
-            const month = $row.find('td:first').text().toLowerCase().replace(/[^a-z0-9]/g, '-');
-            const $receivedInput = $row.find(`input[name="received"]`);
-            const $currentBalanceInput = $row.find(`#currentBalance_${month}`);
-            const $totalDuesCell = $row.find('td:nth-child(6)');
-            const totalDues = parseFloat($totalDuesCell.text().replace('Rs ', '').replace(',', '')) || 0;
-            const received = parseFloat($receivedInput.val()) || 0;
-            const currentBalance = totalDues - received;
-            $currentBalanceInput.val(currentBalance >= 0 ? currentBalance.toFixed(2) : '0.00');
-        }
-
-        $('input[name="received"]').on('input change keyup', function() {
-            const $row = $(this).closest('tr');
-            updateCurrentBalance($row);
-        });
-
-        $('tr').each(function() {
-            const $row = $(this);
-            if ($row.find('input[name="received"]').length) {
-                updateCurrentBalance($row);
-            }
-        });
+$(document).ready(function() {
+    $('.received-input').on('input', function() {
+        // Optional: You can add live calculation here if needed later
     });
+});
 </script>
 {% endblock %}

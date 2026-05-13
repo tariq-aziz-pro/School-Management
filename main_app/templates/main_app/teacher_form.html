@@ -1,64 +1,79 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-{% load static %}
+
+{% block title %}{{ action }} Teacher{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'teacher_list' %}">Teachers</a></li>
+            <li class="breadcrumb-item active">{{ action }} Teacher</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2>{{ action }} Teacher</h2>
+
+<div class="content-area">
+    <h4 class="fw-bold mb-4">{{ action }} Teacher</h4>
+
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
-    <div class="card">
-        <div class="card-header">
-            <h5>{{ action }} Teacher Form</h5>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">{{ action }} Teacher Form</h5>
         </div>
         <div class="card-body">
             <form method="post">
                 {% csrf_token %}
                 {{ form.non_field_errors }}
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="mb-3">{{ form.name|as_crispy_field }}</div>
-                        <div class="mb-3">
-                            {{ form.contact|as_crispy_field }}
-                            <small class="form-text text-muted">Format: +923xxxxxxxxx or 03xxxxxxxxx</small>
-                        </div>
-                        <div class="mb-3">
-                            {{ form.cnic|as_crispy_field }}
-                            <small class="form-text text-muted">Format: 12345-1234567-1</small>
-                        </div>
-                        <div class="mb-3">{{ form.gender|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.class_name|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.section|as_crispy_field }}</div>
+
+                <div class="row g-4">
+                    <!-- Left Column -->
+                    <div class="col-lg-6">
+                        {{ form.name|as_crispy_field }}
+                        {{ form.contact|as_crispy_field }}
+                        {{ form.cnic|as_crispy_field }}
+                        {{ form.gender|as_crispy_field }}
+                        {{ form.class_name|as_crispy_field }}
+                        {{ form.section|as_crispy_field }}
+                        {{ form.subjects|as_crispy_field }}
                     </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">{{ form.subjects|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.education|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.salary|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.date_of_join|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.dob|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.address|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.children_in_school|as_crispy_field }}</div>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="mb-3">{{ form.username|as_crispy_field }}</div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">{{ form.password|as_crispy_field }}</div>
-                        <div class="mb-3">{{ form.confirm_password|as_crispy_field }}</div>
+
+                    <!-- Right Column -->
+                    <div class="col-lg-6">
+                        {{ form.education|as_crispy_field }}
+                        {{ form.salary|as_crispy_field }}
+                        {{ form.date_of_join|as_crispy_field }}
+                        {{ form.dob|as_crispy_field }}
+                        {{ form.address|as_crispy_field }}
+                        {{ form.children_in_school|as_crispy_field }}
+                        
+                        <hr>
+                        <h6 class="mb-3">Login Credentials</h6>
+                        {{ form.username|as_crispy_field }}
+                        {{ form.password|as_crispy_field }}
+                        {{ form.confirm_password|as_crispy_field }}
                     </div>
                 </div>
-                <button type="submit" class="btn btn-success">{{ action }} Teacher</button>
-                <a href="{% url 'teacher_list' %}" class="btn btn-secondary">Cancel</a>
+
+                <div class="mt-4 text-end">
+                    <a href="{% url 'teacher_list' %}" class="btn btn-secondary me-2">Cancel</a>
+                    <button type="submit" class="btn btn-success px-5">{{ action }} Teacher</button>
+                </div>
             </form>
         </div>
     </div>
 </div>
+
 {% endblock %}
