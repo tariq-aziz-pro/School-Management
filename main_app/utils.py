@@ -1,47 +1,58 @@
 from decimal import Decimal
 from .models import AcademicSession, MonthlyFee, StudentAdmission
+from django.db import models
 
+def get_previous_balance(old_admission, active_session):
+    """
+    Finds the final month ledger entry (e.g., March) of the previous session
+    and returns its 'current_balance' to populate the promotion form.
+    """
+    if not old_admission:
+        return Decimal('0.00')
 
-def get_previous_balance(student_admission, active_session):
-    """
-    Get the carried-over balance from the previous session for a student.
-    Used by promotion views and forms.
-    """
-    previous_session = AcademicSession.objects.filter(
-        school=student_admission.student.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
-    ).order_by('-end_date').first()
+    # 1. Identify the previous session tied to this old admission record
+    previous_session = old_admission.academic_session
 
     if not previous_session:
-        # No previous session — fall back to most recent fee or admission balance
-        last_fee = MonthlyFee.objects.filter(
-            student_admission=student_admission
-        ).order_by('-year', '-id').first()
-        if last_fee:
-            return last_fee.current_balance
-        return student_admission.balance or Decimal('0.00')
+        # Fallback to model base if session is detached
+        return getattr(old_admission, 'balance', Decimal('0.00'))
 
-    last_month = previous_session.end_date.strftime('%B')
-    last_year = previous_session.end_date.year
+    # 2. Extract the expected final month name and year from the session's end date
+    # E.g., if end_date is 2026-03-31, this evaluates to 'March' and 2026
+    last_month_name = previous_session.end_date.strftime('%B')  
+    last_year_val = previous_session.end_date.year
 
-    # Try exact month match first
-    last_fee = MonthlyFee.objects.filter(
-        student_admission=student_admission,
-        month=last_month,
-        year=last_year
-    ).order_by('-id').first()
+    # 3. Target the specific last monthly fee ledger entry for this student's old session link
+    last_month_fee = MonthlyFee.objects.filter(
+        student_admission=old_admission,
+        month=last_month_name,
+        year=last_year_val
+    ).first()
 
-    if last_fee:
-        return last_fee.current_balance
+    if last_month_fee:
+        # This represents total_dues minus what they paid in that closing month
+        return last_month_fee.current_balance
 
-    # Fall back to most recent fee in that year
-    last_fee = MonthlyFee.objects.filter(
-        student_admission=student_admission,
-        year__lte=last_year
+    # 4. Fallback 1: If the final month's ledger doesn't exist yet, get their latest ledger in that session
+    latest_fee_any_month = MonthlyFee.objects.filter(
+        student_admission=old_admission
     ).order_by('-year', '-id').first()
 
-    return last_fee.current_balance if last_fee else Decimal('0.00')
+    if latest_fee_any_month:
+        return latest_fee_any_month.current_balance
+
+    # 5. Fallback 2: General safety net using the base balance field on the old session record
+    return getattr(old_admission, 'balance', Decimal('0.00'))
+
+
+
+def get_pending_balance(student_admission):
+    """Use closing_balance for promotion - This is what we finalized"""
+    if not student_admission:
+        return Decimal('0.00')
+    
+    # This is the final projected remaining balance of the entire session
+    return max(student_admission.closing_balance, Decimal('0.00'))
 
 
 def calculate_total_dues(cleaned_data):

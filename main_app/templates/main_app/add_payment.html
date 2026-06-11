@@ -1,25 +1,71 @@
 {% extends 'main_app/base.html' %}
-{% block title %}Add Payment{% endblock %}
 {% load crispy_forms_tags %}
 
-{% block content %}
-<div class="container mt-5 col-md-6">
-    <h3 class="mb-4">Add Payment for {{ school.school_name }}</h3>
+{% block title %}Add Payment{% endblock %}
 
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'developer_dashboard' %}">Developer Dashboard</a></li>
+            <li class="breadcrumb-item active">Add Payment</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="content-area">
+    
+    <!-- Messages -->
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
 
-    <form method="post">
-        {% csrf_token %}
-        {{ form|crispy }}
-        <button type="submit" class="btn btn-primary">Add Payment</button>
-        <a href="{% url 'developer_dashboard' %}" class="btn btn-secondary">Cancel</a>
-    </form>
+    <div class="row justify-content-center">
+        <div class="col-lg-6 col-md-8">
+            
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-success text-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-money-bill-wave me-2"></i>
+                        Add New Payment
+                    </h5>
+                </div>
+                
+                <div class="card-body p-4">
+                    <div class="text-center mb-4">
+                        <h4 class="fw-bold text-dark">{{ school.school_name }}</h4>
+                        <p class="text-muted mb-0">Record new payment for this school</p>
+                    </div>
+
+                    <form method="post">
+                        {% csrf_token %}
+                        
+                        <div class="row g-3">
+                            {{ form|crispy }}
+                        </div>
+
+                        <div class="d-grid gap-2 mt-4">
+                            <button type="submit" class="btn btn-success btn-lg fw-semibold">
+                                <i class="fas fa-check-circle me-2"></i> Save Payment
+                            </button>
+                            <a href="{% url 'developer_dashboard' %}" 
+                               class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+        </div>
+    </div>
 </div>
 {% endblock %}

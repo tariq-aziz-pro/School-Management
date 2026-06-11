@@ -4,13 +4,7 @@
 {% block content %}
 <div class="container mt-5">
     <h2>Promotion Status</h2>
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags }}{% endif %}">
-                {{ message }}
-            </div>
-        {% endfor %}
-    {% endif %}
+    
     <div class="alert alert-success">
         Student {{ student.student.first_name }} {{ student.student.last_name }} has been {% if student.failed_to_promote %}marked as not promoted{% else %}successfully promoted{% endif %} to {{ student.class_name }} - {{ student.section }}.
     </div>

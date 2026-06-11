@@ -1,5 +1,4 @@
 {% extends 'main_app/base.html' %}
-
 {% block title %}Teacher Dashboard{% endblock %}
 
 {% block breadcrumb %}
@@ -13,21 +12,38 @@
 {% endblock %}
 
 {% block content %}
-
 <div class="content-area">
-    <div class="d-flex justify-content-between align-items-start mb-4">
-        <div>
-            <h4 class="fw-bold mb-1">Welcome, {{ request.user.teacher.name }}!</h4>
-            <p class="text-muted">
-                {{ request.user.school.school_name }} • 
-                Class {{ request.user.teacher.class_name }} {{ request.user.teacher.section }}
-            </p>
+
+    <!-- Teacher Profile Header -->
+    <div class="card shadow-sm mb-4 border-0 overflow-hidden">
+        <div class="card-body p-4">
+            <div class="row align-items-center">
+                <div class="col-auto">
+                    <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center" 
+                         style="width: 85px; height: 85px;">
+                        <i class="fas fa-chalkboard-teacher fa-3x text-primary"></i>
+                    </div>
+                </div>
+                <div class="col">
+                    <h3 class="fw-bold mb-1">Welcome, {{ request.user.teacher.name }}!</h3>
+                    <p class="text-muted mb-2">
+                        {{ request.user.school.school_name }} • 
+                        <strong>Class {{ request.user.teacher.class_name }} {{ request.user.teacher.section }}</strong>
+                    </p>
+                    <p class="mb-0 text-muted">
+                        <i class="fas fa-book"></i> Subjects: 
+                        <strong>{{ request.user.teacher.subjects.all|join:", " }}</strong>
+                    </p>
+                </div>
+                <div class="col-auto text-end">
+                    {% if active_session %}
+                        <span class="badge bg-success fs-6 px-3 py-2">
+                            {{ active_session.session_name }}
+                        </span>
+                    {% endif %}
+                </div>
+            </div>
         </div>
-        {% if active_session %}
-            <span class="badge bg-success fs-6">
-                Session: {{ active_session.session_name }}
-            </span>
-        {% endif %}
     </div>
 
     {% if messages %}
@@ -41,117 +57,131 @@
 
     {% if not active_session %}
         <div class="alert alert-warning">
-            <strong>No Active Session</strong><br>
+            <strong>No Active Session Found</strong><br>
             Please contact the school admin to activate an academic session.
         </div>
     {% else %}
 
         <div class="row g-4">
 
-            <!-- Quick Actions -->
+            <!-- Quick Action Cards -->
             <div class="col-md-4">
-                <a href="{% url 'result_create' %}" class="card shadow-sm text-decoration-none h-100">
+                <a href="{% url 'result_create' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
                     <div class="card-body text-center py-5">
                         <i class="fas fa-plus-circle fa-3x text-primary mb-3"></i>
-                        <h5>Add New Result</h5>
+                        <h5 class="fw-bold">Add New Result</h5>
                         <small class="text-muted">Record marks for your students</small>
                     </div>
                 </a>
             </div>
 
             <div class="col-md-4">
-                <a href="{% url 'add_syllabus' %}" class="card shadow-sm text-decoration-none h-100">
+                <a href="{% url 'add_syllabus' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
                     <div class="card-body text-center py-5">
                         <i class="fas fa-book fa-3x text-success mb-3"></i>
-                        <h5>Manage Syllabus</h5>
-                        <small class="text-muted">Upload or update syllabus</small>
+                        <h5 class="fw-bold">Manage Syllabus</h5>
+                        <small class="text-muted">Upload study material</small>
                     </div>
                 </a>
             </div>
 
             <div class="col-md-4">
-                <a href="{% url 'teacher_dashboard' %}" class="card shadow-sm text-decoration-none h-100">
+                <a href="{% url 'teacher_dashboard' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
                     <div class="card-body text-center py-5">
-                        <i class="fas fa-chart-bar fa-3x text-info mb-3"></i>
-                        <h5>View My Results</h5>
-                        <small class="text-muted">See all recorded marks</small>
+                        <i class="fas fa-users fa-3x text-info mb-3"></i>
+                        <h5 class="fw-bold">My Class ({{ total_students|default:0 }})</h5>
+                        <small class="text-muted">View all students</small>
                     </div>
                 </a>
             </div>
 
-        </div>
-
-        <!-- Results Overview -->
-        <div class="card shadow-sm mt-4">
-            <div class="card-header">
-                <h5 class="mb-0">Recent Results</h5>
-            </div>
-            <div class="card-body">
-                {% if results %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead>
-                                <tr>
-                                    <th>Student</th>
-                                    <th>Subject</th>
-                                    <th>Exam Type</th>
-                                    <th>Obtained / Total</th>
-                                    <th>Percentage</th>
-                                    <th>Grade</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for result in results|slice:":10" %}
-                                <tr>
-                                    <td>{{ result.student_admission.student.first_name }} {{ result.student_admission.student.last_name }}</td>
-                                    <td>{{ result.subject.name }}</td>
-                                    <td>{{ result.exam_type }}</td>
-                                    <td>{{ result.obtained_marks }} / {{ result.total_marks }}</td>
-                                    <td>{{ result.percentage|floatformat:1 }}%</td>
-                                    <td><strong>{{ result.grade }}</strong></td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+            <!-- Recent Results -->
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0 d-flex align-items-center">
+                            <i class="fas fa-chart-bar text-primary me-2"></i>
+                            Recent Results
+                        </h5>
                     </div>
-                {% else %}
-                    <p class="text-muted text-center py-5">No results recorded yet.</p>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Events -->
-        {% if events %}
-        <div class="card shadow-sm mt-4">
-            <div class="card-header">
-                <h5 class="mb-0">Upcoming Events</h5>
-            </div>
-            <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table">
-                        <thead>
-                            <tr>
-                                <th>Event</th>
-                                <th>Date</th>
-                                <th>Description</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for event in events %}
-                            <tr>
-                                <td>{{ event.get_event_type_display }}</td>
-                                <td>{{ event.event_date|date:"d M Y" }}</td>
-                                <td>{{ event.description|truncatechars:80 }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                    <div class="card-body">
+                        {% if results %}
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Student</th>
+                                            <th>Subject</th>
+                                            <th>Exam Type</th>
+                                            <th class="text-end">Marks</th>
+                                            <th class="text-end">Percentage</th>
+                                            <th class="text-center">Grade</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for result in results|slice:":10" %}
+                                        <tr>
+                                            <td>
+                                                <strong>{{ result.student_admission.student.first_name }} {{ result.student_admission.student.last_name }}</strong>
+                                            </td>
+                                            <td>{{ result.subject.name }}</td>
+                                            <td>{{ result.exam_type }}</td>
+                                            <td class="text-end fw-medium">
+                                                {{ result.obtained_marks }} / {{ result.total_marks }}
+                                            </td>
+                                            <td class="text-end">{{ result.percentage|floatformat:1 }}%</td>
+                                            <td class="text-center">
+                                                <span class="badge {% if result.grade == 'A+' or result.grade == 'A' %}bg-success{% elif result.grade == 'F' %}bg-danger{% else %}bg-info{% endif %}">
+                                                    {{ result.grade }}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <div class="text-center py-5 text-muted">
+                                <i class="fas fa-file-alt fa-3x mb-3"></i>
+                                <p>No results recorded yet.</p>
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
-        </div>
-        {% endif %}
 
+            <!-- Upcoming Events -->
+            {% if events %}
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white">
+                        <h5 class="mb-0 d-flex align-items-center">
+                            <i class="fas fa-calendar-day text-warning me-2"></i>
+                            Upcoming Events
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush">
+                            {% for event in events %}
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <strong>{{ event.event_type }}</strong>
+                                        <p class="text-muted small mb-0">{{ event.description|truncatewords:25 }}</p>
+                                    </div>
+                                    <div class="text-end">
+                                        <small class="badge bg-light text-dark">{{ event.event_date|date:"d M" }}</small>
+                                    </div>
+                                </div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+        </div>
     {% endif %}
 </div>
-
 {% endblock %}

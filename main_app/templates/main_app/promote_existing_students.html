@@ -1,4 +1,4 @@
-{% extends 'main_app/base.html' %}
+﻿{% extends 'main_app/base.html' %}
 
 {% block title %}Promote Existing Students{% endblock %}
 
@@ -14,162 +14,181 @@
 {% endblock %}
 
 {% block content %}
-
 <div class="content-area">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h4 class="fw-bold mb-0">Promote Existing Students</h4>
         <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
     </div>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
     {% if no_previous %}
-        <div class="alert alert-warning text-center py-5">
-            <i class="fas fa-info-circle fa-3x mb-3 text-warning"></i>
-            <h5>No Previous Academic Session Found</h5>
-            <p>This appears to be the first session of your school.</p>
-            <a href="{% url 'dashboard' %}" class="btn btn-primary">Go to Dashboard</a>
-        </div>
+    <div class="alert alert-warning text-center py-5">
+        <i class="fas fa-info-circle fa-3x mb-3 text-warning"></i>
+        <h5>No Previous Academic Session Found</h5>
+        <p>This appears to be the first session of your school.</p>
+        <p class="mb-0">Please create a new academic session first.</p>
+        <a href="{% url 'dashboard' %}" class="btn btn-primary mt-3">Go to Dashboard</a>
+    </div>
     {% else %}
 
-        <!-- Filter -->
-        <div class="card shadow-sm mb-4">
-            <div class="card-body">
-                <form method="post" class="row g-3 align-items-end">
-                    {% csrf_token %}
-                    <div class="col-md-4">
-                        <label class="form-label">Class</label>
-                        <select name="class_name" class="form-select">
-                            <option value="">Select Class</option>
-                            {% for class_name in class_choices %}
-                                <option value="{{ class_name }}" {% if class_name == selected_class_name %}selected{% endif %}>{{ class_name }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Section</label>
-                        <select name="section" class="form-select">
-                            <option value="">Select Section</option>
-                            {% for section in section_choices %}
-                                <option value="{{ section.0 }}" {% if section.0 == selected_section %}selected{% endif %}>{{ section.1 }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="col-md-4">
-                        <button type="submit" class="btn btn-primary w-100">Filter Students</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        {% if students %}
-            <form method="post" id="bulkPromoteForm">
+    <!-- Filter Form -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <form method="post" class="row g-3 align-items-end">
                 {% csrf_token %}
-                <input type="hidden" name="action" id="bulk_action" value="">
+                
+                <div class="col-md-4">
+                    <label class="form-label">Class</label>
+                    <select name="class_name" class="form-select">
+                        <option value="">Select Class</option>
+                        {% for class_choice in class_choices %}
+                        <option value="{{ class_choice }}"
+                                {% if class_choice == selected_class_name %}selected{% endif %}>
+                            {{ class_choice }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-                <div class="card shadow-sm">
-                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            Students in <strong>{{ selected_class_name }} - {{ selected_section }}</strong> 
-                            (<span id="selectedCount">0</span> selected)
-                        </h5>
-                        <div>
-                            <button type="button" class="btn btn-success btn-sm" onclick="bulkAction('promote')">
-                                <i class="fas fa-arrow-up"></i> Promote Selected
-                            </button>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="bulkAction('not_promote')">
-                                <i class="fas fa-arrow-down"></i> Not Promote Selected
-                            </button>
-                        </div>
-                    </div>
+                <div class="col-md-4">
+                    <label class="form-label">Section</label>
+                    <select name="section" class="form-select">
+                        <option value="">Select Section</option>
+                        {% for section_code, section_label in section_choices %}
+                        <option value="{{ section_code }}"
+                                {% if section_code == selected_section %}selected{% endif %}>
+                            {{ section_label }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-                    <div class="table-responsive">
-                        <table class="table table-hover mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th style="width: 50px;">
-                                        <input type="checkbox" id="selectAll">
-                                    </th>
-                                    <th>Student ID</th>
-                                    <th>Name</th>
-                                    <th>Roll Number</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for student in students %}
-                                <tr>
-                                    <td>
-                                        <input type="checkbox" name="student_ids" value="{{ student.student.student_id }}" class="student-checkbox">
-                                    </td>
-                                    <td class="fw-semibold">{{ student.student.student_id }}</td>
-                                    <td>{{ student.student.first_name }} {{ student.student.last_name }}</td>
-                                    <td>{{ student.roll_number }}</td>
-                                    <td>
-                                        {% if student.promoted %}
-                                            <span class="badge bg-success">Promoted</span>
-                                        {% else %}
-                                            <span class="badge bg-warning">Pending</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                <div class="col-md-4">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">Filter Students</button>
                 </div>
             </form>
-        {% elif selected_class_name and selected_section %}
-            <div class="alert alert-info text-center py-5">
-                No students found in <strong>{{ selected_class_name }} - {{ selected_section }}</strong>.
+        </div>
+    </div>
+
+    {% if students %}
+    <!-- Bulk Promotion Form -->
+    <form method="post" id="bulkPromoteForm">
+        {% csrf_token %}
+        <input type="hidden" name="action" id="bulk_action" value="">
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    Students in <strong>{{ selected_class_name }} - {{ selected_section }}</strong>
+                    (<span id="selectedCount">0</span> selected)
+                </h5>
+                <div>
+                    <button type="button" class="btn btn-success btn-sm" onclick="bulkAction('promote')">
+                        <i class="fas fa-arrow-up"></i> Promote Selected
+                    </button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="bulkAction('not_promote')">
+                        <i class="fas fa-arrow-down"></i> Not Promote Selected
+                    </button>
+                </div>
             </div>
-        {% endif %}
+
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 50px;">
+                                <input type="checkbox" id="selectAll">
+                            </th>
+                            <th>Student ID</th>
+                            <th>Name</th>
+                            <th>Roll Number</th>
+                            <th>Pending Balance</th>
+                            <th>Status</th>
+                            <th style="width: 180px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for student in students %}
+                        <tr>
+                            <td>
+                                <input type="checkbox" name="student_ids" 
+                                       value="{{ student.student.student_id }}" 
+                                       class="student-checkbox">
+                            </td>
+                            <td class="fw-semibold">{{ student.student.student_id }}</td>
+                            <td>{{ student.student.first_name }} {{ student.student.last_name }}</td>
+                            <td>{{ student.roll_number }}</td>
+                            <td>
+                                <strong class="{% if student.pending_balance > 0 %}text-danger{% else %}text-success{% endif %}">
+                                    Rs {{ student.pending_balance|floatformat:2 }}
+                                </strong>
+                            </td>
+                            <td>
+                                {% if student.promoted %}
+                                    <span class="badge bg-success">Promoted</span>
+                                {% else %}
+                                    <span class="badge bg-warning">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if not student.promoted and student.student.student_id not in admitted_student_ids %}
+                                    <a href="{% url 'promote_existing_student' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
+                                       class="btn btn-sm btn-outline-success me-1">Promote</a>
+                                    <a href="{% url 'mark_not_promoted' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
+                                       class="btn btn-sm btn-outline-danger">Not Promote</a>
+                                {% else %}
+                                    <span class="text-muted">No actions</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </form>
+
+    {% elif selected_class_name and selected_section %}
+    <div class="alert alert-info text-center py-5">
+        No students found in <strong>{{ selected_class_name }} - {{ selected_section }}</strong>.
+    </div>
+    {% endif %}
 
     {% endif %}
 </div>
-
 {% endblock %}
 
 {% block extra_js %}
 <script>
-$(document).ready(function() {
-    // Select All
-    $('#selectAll').on('change', function() {
-        $('.student-checkbox').prop('checked', this.checked);
-        updateSelectedCount();
+    $(document).ready(function () {
+        $('#selectAll').on('change', function () {
+            $('.student-checkbox').prop('checked', this.checked);
+            updateSelectedCount();
+        });
+
+        $('.student-checkbox').on('change', updateSelectedCount);
+
+        function updateSelectedCount() {
+            const count = $('.student-checkbox:checked').length;
+            $('#selectedCount').text(count);
+        }
     });
 
-    // Individual checkbox
-    $('.student-checkbox').on('change', updateSelectedCount);
+    function bulkAction(action) {
+        const selected = $('.student-checkbox:checked').length;
+        if (selected === 0) {
+            alert("Please select at least one student.");
+            return;
+        }
 
-    function updateSelectedCount() {
-        const count = $('.student-checkbox:checked').length;
-        $('#selectedCount').text(count);
+        const message = action === 'promote'
+            ? `Promote ${selected} selected students?`
+            : `Mark ${selected} selected students as Not Promoted?`;
+
+        if (confirm(message)) {
+            $('#bulk_action').val(action);
+            $('#bulkPromoteForm').submit();
+        }
     }
-});
-
-function bulkAction(action) {
-    const selected = $('.student-checkbox:checked').length;
-    if (selected === 0) {
-        alert("Please select at least one student.");
-        return;
-    }
-
-    const message = action === 'promote' 
-        ? `Promote ${selected} selected students?` 
-        : `Mark ${selected} selected students as Not Promoted?`;
-
-    if (confirm(message)) {
-        $('#bulk_action').val(action);
-        $('#bulkPromoteForm').submit();
-    }
-}
 </script>
 {% endblock %}

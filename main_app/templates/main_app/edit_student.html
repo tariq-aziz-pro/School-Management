@@ -21,14 +21,7 @@
         Edit Student: {{ student.student.first_name }} {{ student.student.last_name }}
     </h4>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
+    
 
     <form method="post" enctype="multipart/form-data" id="editStudentForm">
         {% csrf_token %}
@@ -127,16 +120,48 @@ $(document).ready(function() {
     }
 
     function updateTransportFields() {
+
         var transport = $('#id_transport').val();
+
+        var vehicleField =
+            $('#id_vehicle_no').closest('.mb-3, .form-group');
+
+        var routeField =
+            $('#id_route').closest('.mb-3, .form-group');
+
+        var driverField =
+            $('#id_driver_contact').closest('.mb-3, .form-group');
+
+        var feeField =
+            $('#id_transport_fee').closest('.mb-3, .form-group');
+
         if (transport === 'No') {
-            $('#id_vehicle_no, #id_route, #id_driver_contact, #id_transport_fee').closest('.form-group').hide();
+
+            vehicleField.hide();
+            routeField.hide();
+            driverField.hide();
+            feeField.hide();
+
+        }
+
+        else if (transport === 'Free') {
+
+            vehicleField.show();
+            routeField.show();
+            driverField.show();
+
+            feeField.hide();
             $('#id_transport_fee').val('0.00');
-        } else if (transport === 'Free') {
-            $('#id_vehicle_no, #id_route, #id_driver_contact').closest('.form-group').show();
-            $('#id_transport_fee').closest('.form-group').hide();
-            $('#id_transport_fee').val('0.00');
-        } else if (transport === 'Paid') {
-            $('#id_vehicle_no, #id_route, #id_driver_contact, #id_transport_fee').closest('.form-group').show();
+
+        }
+
+        else if (transport === 'Paid') {
+
+            vehicleField.show();
+            routeField.show();
+            driverField.show();
+            feeField.show();
+
         }
     }
 

@@ -238,7 +238,7 @@ LOGGING = {
 }
 
 
-AUTHENTICATION_BACKENDS = ['main_app.views.CustomAuthBackend']
+AUTHENTICATION_BACKENDS = ['main_app.backends.CustomAuthBackend']
 
 
 SESSION_COOKIE_SECURE = USE_HTTPS

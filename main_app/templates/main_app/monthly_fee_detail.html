@@ -18,22 +18,51 @@
 {% block content %}
 
 <div class="content-area">
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-        <div>
-            <h4 class="fw-bold mb-1">
-                {{ student.student.first_name }} {{ student.student.last_name }}
-            </h4>
-            <p class="text-muted mb-0">
-                {{ student.class_name }} - {{ student.section }} | 
-                ID: <strong>{{ student.student.student_id }}</strong>
-            </p>
+    <div class="card shadow-sm border-0 mb-4">
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+
+        <div class="d-flex align-items-center gap-3">
+
+            <div class="avatar-circle">
+                {{ student.student.first_name|slice:":1" }}
+            </div>
+
+            <div>
+                <h4 class="fw-bold mb-1">
+                    {{ student.student.first_name }}
+                    {{ student.student.last_name }}
+                </h4>
+
+                <div class="text-muted">
+
+                    <span class="badge bg-primary-subtle text-primary">
+                        {{ student.class_name }}
+                    </span>
+
+                    <span class="badge bg-secondary-subtle text-secondary">
+                        Section {{ student.section }}
+                    </span>
+
+                    <span class="ms-2">
+                        ID:
+                        <strong>{{ student.student.student_id }}</strong>
+                    </span>
+
+                </div>
+            </div>
+
         </div>
-        <div>
-            <a href="{% url 'monthly_fee' %}" class="btn btn-secondary">
-                <i class="fas fa-arrow-left"></i> Back to Search
-            </a>
-        </div>
+
+        <a href="{% url 'monthly_fee' %}"
+           class="btn btn-outline-primary">
+
+            <i class="fas fa-arrow-left me-2"></i>
+            Back
+
+        </a>
+
     </div>
+</div>
 
     {% if active_session %}
         <p class="text-primary mb-4">
@@ -52,6 +81,8 @@
     {% endif %}
 
     <!-- Months Grid -->
+
+    
     <div class="row g-4">
         {% for data in month_data %}
         <div class="col-lg-6 col-xl-4">
@@ -64,6 +95,10 @@
                         </span>
                     </h5>
                 </div>
+
+                
+
+
                 <div class="card-body">
                     {% if data.fee %}
                         <!-- Already Paid -->
@@ -151,6 +186,22 @@ $(document).ready(function() {
     $('.received-input').on('input', function() {
         // Optional: You can add live calculation here if needed later
     });
+});
+
+
+
+
+$('form').on('submit', function(){
+
+const btn = $(this).find('button[type="submit"]');
+
+btn.prop('disabled', true);
+
+btn.html(`
+<span class="spinner-border spinner-border-sm me-2"></span>
+Saving...
+`);
+
 });
 </script>
 {% endblock %}

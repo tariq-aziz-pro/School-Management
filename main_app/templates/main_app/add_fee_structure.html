@@ -15,17 +15,9 @@
 {% endblock %}
 
 {% block content %}
-
 <div class="content-area">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold mb-0">Fee Structure Management</h4>
-        {% if active_session %}
-            <span class="badge bg-success fs-6">
-                <i class="fas fa-calendar-check"></i> {{ active_session.session_name }}
-            </span>
-        {% endif %}
-    </div>
-
+    
+    <!-- Messages -->
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
@@ -35,19 +27,41 @@
         {% endfor %}
     {% endif %}
 
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0">Fee Structure Management</h4>
+        {% if active_session %}
+            <span class="badge bg-success px-3 py-2">
+                <i class="fas fa-calendar-check me-1"></i> {{ active_session.session_name }}
+            </span>
+        {% endif %}
+    </div>
+
     <div class="row g-4">
-        <!-- Add New Fee Structure -->
+        
+        <!-- Add / Edit Fee Structure -->
         <div class="col-lg-5">
-            <div class="card shadow-sm h-100">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Add New Fee Structure</h5>
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-primary text-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-plus-circle me-2"></i>
+                        Add New Fee Structure
+                    </h5>
                 </div>
                 <div class="card-body">
-                    <form method="POST">
+                    <form method="POST" id="feeStructureForm">
                         {% csrf_token %}
-                        {{ form|crispy }}
-                        <button type="submit" class="btn btn-success w-100 mt-3 py-2">
-                            <i class="fas fa-save"></i> Save Fee Structure
+                        <div class="row g-3">
+                            {{ form.class_name|as_crispy_field }}
+                            {{ form.tuition_fee|as_crispy_field }}
+                            {{ form.admission_fee|as_crispy_field }}
+                            {{ form.books_dues|as_crispy_field }}
+                            {{ form.uniform_dues|as_crispy_field }}
+                            {{ form.paper_money|as_crispy_field }}
+                            {{ form.promotion_fee|as_crispy_field }}
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success w-100 mt-4 py-2 fw-semibold">
+                            <i class="fas fa-save me-2"></i> Save Fee Structure
                         </button>
                     </form>
                 </div>
@@ -56,24 +70,24 @@
 
         <!-- Existing Fee Structures -->
         <div class="col-lg-7">
-            <div class="card shadow-sm h-100">
-                <div class="card-header bg-light">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-light py-3">
                     <h5 class="mb-0">
-                        <i class="fas fa-list me-2"></i> 
+                        <i class="fas fa-list-ul me-2"></i>
                         Existing Fee Structures
                     </h5>
                 </div>
                 <div class="card-body p-0">
                     <div class="table-responsive">
-                        <table class="table table-hover mb-0">
+                        <table class="table table-hover mb-0 align-middle">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Class</th>
+                                    <th width="15%">Class</th>
                                     <th>Tuition Fee</th>
-                                    <th>Admission Fee</th>
+                                    <th>Admission</th>
                                     <th>Books</th>
                                     <th>Uniform</th>
-                                    <th>Exam/Paper</th>
+                                    <th>Exam</th>
                                     <th>Promotion</th>
                                     <th class="text-end">Action</th>
                                 </tr>
@@ -82,15 +96,15 @@
                                 {% for fee in existing_fees %}
                                 <tr>
                                     <td><strong>{{ fee.class_name }}</strong></td>
-                                    <td>Rs {{ fee.tuition_fee|floatformat:2 }}</td>
-                                    <td>Rs {{ fee.admission_fee|floatformat:2 }}</td>
-                                    <td>Rs {{ fee.books_dues|floatformat:2 }}</td>
-                                    <td>Rs {{ fee.uniform_dues|floatformat:2 }}</td>
-                                    <td>Rs {{ fee.paper_money|floatformat:2 }}</td>
-                                    <td>Rs {{ fee.promotion_fee|floatformat:2 }}</td>
+                                    <td class="fw-medium">Rs {{ fee.tuition_fee|floatformat:0 }}</td>
+                                    <td>Rs {{ fee.admission_fee|floatformat:0 }}</td>
+                                    <td>Rs {{ fee.books_dues|floatformat:0 }}</td>
+                                    <td>Rs {{ fee.uniform_dues|floatformat:0 }}</td>
+                                    <td>Rs {{ fee.paper_money|floatformat:0 }}</td>
+                                    <td>Rs {{ fee.promotion_fee|floatformat:0 }}</td>
                                     <td class="text-end">
                                         <a href="{% url 'edit_fee_structure' fee.id %}" 
-                                           class="btn btn-sm btn-primary">
+                                           class="btn btn-sm btn-outline-primary">
                                             <i class="fas fa-edit"></i> Edit
                                         </a>
                                     </td>
@@ -98,6 +112,7 @@
                                 {% empty %}
                                 <tr>
                                     <td colspan="8" class="text-center py-5 text-muted">
+                                        <i class="fas fa-info-circle me-2"></i>
                                         No fee structures added yet for this session.
                                     </td>
                                 </tr>
@@ -108,7 +123,7 @@
                 </div>
             </div>
         </div>
+        
     </div>
 </div>
-
 {% endblock %}

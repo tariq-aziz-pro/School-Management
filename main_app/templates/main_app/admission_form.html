@@ -19,14 +19,6 @@
 <div class="content-area">
     <h4 class="fw-bold mb-4">New Student Admission</h4>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
 
     <form method="post" enctype="multipart/form-data" novalidate id="admissionForm">
         {% csrf_token %}
@@ -143,6 +135,25 @@
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
 $(document).ready(function() {
+
+
+    // ====================== DISABLE MOUSE WHEEL ON NUMBER FIELDS ======================
+    function disableMouseWheelOnNumbers() {
+        $('input[type="number"]').on('wheel', function(e) {
+            e.preventDefault();           // Prevent scrolling
+            $(this).blur();               // Remove focus (best UX)
+        });
+
+        // Also handle when user focuses on the field
+        $('input[type="number"]').on('focus', function() {
+            $(this).on('wheel', function(e) {
+                e.preventDefault();
+            });
+        });
+    }
+
+    // Call the function
+    disableMouseWheelOnNumbers();
 
     // Auto fetch fees when class is selected
     function fetchFeeStructure(className) {

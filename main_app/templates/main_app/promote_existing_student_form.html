@@ -4,21 +4,19 @@
 {% block content %}
 <div class="container mt-5">
     <h2>Promote Student: {{ student.student.first_name }} {{ student.student.last_name }}</h2>
+
     <div class="alert alert-info">
-        Promoting from <strong>{{ current_class }}</strong> to <strong>{{ form.class_name.value|default:current_class }}</strong> for academic session <strong>{{ active_session.session_name }}</strong>
+        Promoting from <strong>{{ current_class }}</strong> 
+        to <strong>{{ form.class_name.value|default:current_class }}</strong> 
+        for academic session <strong>{{ active_session.session_name }}</strong>
     </div>
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert {% if message.tags == 'error' %}alert-danger{% else %}alert-{{ message.tags }}{% endif %}">
-                {{ message }}
-            </div>
-        {% endfor %}
-    {% endif %}
+
     <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        
         <div class="row">
             <div class="col-md-6">
-                <h4>Personal Details</h4>
+                <h4 class="mb-3">Personal Details</h4>
                 {{ form.first_name|as_crispy_field }}
                 {{ form.last_name|as_crispy_field }}
                 {{ form.father_guardian_name|as_crispy_field }}
@@ -27,12 +25,14 @@
                 {{ form.gender|as_crispy_field }}
                 {{ form.image|as_crispy_field }}
             </div>
+
             <div class="col-md-6">
-                <h4>Academic Details</h4>
+                <h4 class="mb-3">Academic &amp; Transport Details</h4>
                 {{ form.class_name|as_crispy_field }}
                 {{ form.section|as_crispy_field }}
                 {{ form.roll_number|as_crispy_field }}
-                <h4>Transport Details</h4>
+
+                <h5 class="mt-4">Transport</h5>
                 {{ form.transport|as_crispy_field }}
                 <div id="transport-fields">
                     {{ form.vehicle_no|as_crispy_field }}
@@ -40,132 +40,93 @@
                     {{ form.driver_contact|as_crispy_field }}
                     {{ form.transport_fee|as_crispy_field }}
                 </div>
-                <h4>Fee Details</h4>
+
+                <h4 class="mt-4 mb-3">Fee Configuration</h4>
                 {{ form.previous_balance|as_crispy_field }}
+                {{ form.previous_balance_action|as_crispy_field }}
+
                 {{ form.tuition_fee|as_crispy_field }}
                 {{ form.exam_fee|as_crispy_field }}
                 {{ form.book_fee|as_crispy_field }}
                 {{ form.uniform_fee|as_crispy_field }}
-                {{ form.other_fee|as_crispy_field }}
                 {{ form.promotion_fee|as_crispy_field }}
+                {{ form.other_fee|as_crispy_field }}
                 {{ form.discount|as_crispy_field }}
                 {{ form.discount_behalf|as_crispy_field }}
                 {{ form.received|as_crispy_field }}
-                {{ form.total_dues|as_crispy_field }}
-                {{ form.balance|as_crispy_field }}
+
+                <div class="mt-3">
+                    {{ form.total_dues|as_crispy_field }}
+                    {{ form.balance|as_crispy_field }}
+                </div>
             </div>
         </div>
-        <button type="submit" class="btn btn-primary mt-3">Promote</button>
-        <a href="{% url 'promote_existing_students' %}?class_name={{ filtered_class|urlencode }}&section={{ filtered_section|urlencode }}" class="btn btn-secondary mt-3">Cancel</a>
+
+        <div class="mt-4">
+            <button type="submit" class="btn btn-success px-5">Promote Student</button>
+            <a href="{% url 'promote_existing_students' %}?class_name={{ filtered_class|urlencode }}&section={{ filtered_section|urlencode }}" 
+               class="btn btn-secondary px-4">Cancel</a>
+        </div>
     </form>
 </div>
+{% endblock %}
 
 {% block extra_js %}
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-$(document).ready(function() {
-    // Pre-loaded fee structures from the view
-    var feeStructures = {{ fee_structures|safe }};
+    $(document).ready(function () {
+        var feeStructures = {{ fee_structures|safe }};
 
-    function calculateTotals() {
-        var previous_balance = parseFloat($('#id_previous_balance').val()) || 0;
-        var tuition_fee = parseFloat($('#id_tuition_fee').val()) || 0;
-        var exam_fee = parseFloat($('#id_exam_fee').val()) || 0;
-        var book_fee = parseFloat($('#id_book_fee').val()) || 0;
-        var uniform_fee = parseFloat($('#id_uniform_fee').val()) || 0;
-        var other_fee = parseFloat($('#id_other_fee').val()) || 0;
-        var promotion_fee = parseFloat($('#id_promotion_fee').val()) || 0;
-        var transport_fee = parseFloat($('#id_transport_fee').val()) || 0;
-        var discount = parseFloat($('#id_discount').val()) || 0;
-        var received = parseFloat($('#id_received').val()) || 0;
-        var total_dues = (
-            previous_balance +
-            tuition_fee +
-            exam_fee +
-            book_fee +
-            uniform_fee +
-            other_fee +
-            promotion_fee +
-            transport_fee -
-            discount
-        );
-        var balance = total_dues - received;
-        $('#id_total_dues').val(total_dues.toFixed(2));
-        $('#id_balance').val(balance.toFixed(2));
-    }
+        function calculateTotals() {
+            var previous_balance = parseFloat($('#id_previous_balance').val()) || 0;
+            var action = $('#id_previous_balance_action').val() || 'carry';
+            var tuition = parseFloat($('#id_tuition_fee').val()) || 0;
+            var exam = parseFloat($('#id_exam_fee').val()) || 0;
+            var book = parseFloat($('#id_book_fee').val()) || 0;
+            var uniform = parseFloat($('#id_uniform_fee').val()) || 0;
+            var promotion = parseFloat($('#id_promotion_fee').val()) || 0;
+            var other = parseFloat($('#id_other_fee').val()) || 0;
+            var transport = parseFloat($('#id_transport_fee').val()) || 0;
+            var discount = parseFloat($('#id_discount').val()) || 0;
+            var received = parseFloat($('#id_received').val()) || 0;
 
-    function updateTransportFields() {
-        var transport = $('#id_transport').val();
-        var $vehicleNo = $('[for="id_vehicle_no"]').closest('.form-group');
-        var $route = $('[for="id_route"]').closest('.form-group');
-        var $driverContact = $('[for="id_driver_contact"]').closest('.form-group');
-        var $transportFee = $('[for="id_transport_fee"]').closest('.form-group');
-        if (transport === 'No') {
-            $vehicleNo.hide();
-            $route.hide();
-            $driverContact.hide();
-            $transportFee.hide();
-            $('#id_vehicle_no, #id_route, #id_driver_contact').val('');
-            $('#id_transport_fee').val('0.00');
-        } else if (transport === 'Free') {
-            $vehicleNo.show();
-            $route.show();
-            $driverContact.show();
-            $transportFee.hide();
-            $('#id_transport_fee').val('0.00');
-        } else if (transport === 'Paid') {
-            $vehicleNo.show();
-            $route.show();
-            $driverContact.show();
-            $transportFee.show();
+            var prev = (action === 'carry') ? previous_balance : 0;
+            var rec = (action === 'apply') ? received + previous_balance : received;
+
+            var total = prev + tuition + exam + book + uniform + promotion + other + transport - discount;
+            var balance = total - rec;
+
+            $('#id_total_dues').val(total.toFixed(2));
+            $('#id_balance').val(balance.toFixed(2));
         }
-        calculateTotals();
-    }
 
-    // Update fee fields when class changes
-    $('#id_class_name').on('change', function() {
-        var className = $(this).val();
-        if (feeStructures[className]) {
-            $('#id_tuition_fee').val(feeStructures[className].tuition_fee);
-            $('#id_exam_fee').val(feeStructures[className].exam_fee);
-            $('#id_book_fee').val(feeStructures[className].book_fee);
-            $('#id_uniform_fee').val(feeStructures[className].uniform_fee);
-            $('#id_other_fee').val(feeStructures[className].other_fee);
-            $('#id_promotion_fee').val(feeStructures[className].promotion_fee);
-        } else {
-            Swal.fire({
-                icon: 'warning',
-                title: 'Warning',
-                text: 'No fee structure found for class ' + className
-            });
-            $('#id_tuition_fee').val('0.00');
-            $('#id_exam_fee').val('0.00');
-            $('#id_book_fee').val('0.00');
-            $('#id_uniform_fee').val('0.00');
-            $('#id_other_fee').val('0.00');
-            $('#id_promotion_fee').val('0.00');
+        function updateTransportFields() {
+            var val = $('#id_transport').val();
+            if (val === 'No' || val === 'Free') {
+                $('#id_transport_fee').val('0.00');
+            }
+            calculateTotals();
         }
+
+        $('#id_class_name').on('change', function () {
+            var cls = $(this).val();
+            if (feeStructures[cls]) {
+                $('#id_tuition_fee').val(feeStructures[cls].tuition_fee);
+                $('#id_exam_fee').val(feeStructures[cls].exam_fee);
+                $('#id_book_fee').val(feeStructures[cls].book_fee);
+                $('#id_uniform_fee').val(feeStructures[cls].uniform_fee);
+                $('#id_promotion_fee').val(feeStructures[cls].promotion_fee);
+                $('#id_other_fee').val(feeStructures[cls].other_fee);
+            }
+            calculateTotals();
+        });
+
+        // Event listeners
+        $('#id_previous_balance_action, #id_previous_balance, #id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_promotion_fee, #id_other_fee, #id_transport_fee, #id_discount, #id_received, #id_transport')
+            .on('input change', calculateTotals);
+
+        updateTransportFields();
         calculateTotals();
     });
-
-    $('#id_previous_balance, #id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input change keyup', calculateTotals);
-    $('#id_transport').on('change', updateTransportFields);
-    updateTransportFields();
-    calculateTotals();
-});
-
-document.addEventListener('wheel', function(e) {
-    if (document.activeElement.type === 'number' && document.activeElement === e.target) {
-        e.preventDefault();
-    }
-}, { passive: false });
-
-document.addEventListener('keydown', function(e) {
-    if (document.activeElement.type === 'number' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-    }
-});
 </script>
-{% endblock %}
 {% endblock %}

@@ -1,26 +1,70 @@
 {% extends 'main_app/base.html' %}
-{% block title %}{{ action }} Syllabus{% endblock %}
 {% load crispy_forms_tags %}
 
+{% block title %}{{ action }} Syllabus{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'syllabus_list' %}">Syllabus</a></li>
+            <li class="breadcrumb-item active">{{ action }} Syllabus</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
 {% block content %}
-<div class="container mt-4">
-    <h2>{{ action }} Syllabus</h2>
+<div class="content-area">
+    
+    <!-- Messages -->
     {% if messages %}
         {% for message in messages %}
             <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
                 {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
         {% endfor %}
     {% endif %}
-    <div class="card">
-        <div class="card-body">
-            <form method="post" enctype="multipart/form-data">
-                {% csrf_token %}
-                {{ form|crispy }}
-                <button type="submit" class="btn btn-primary">{{ action }}</button>
-                <a href="{% url 'syllabus_list' %}" class="btn btn-secondary">Cancel</a>
-            </form>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0">
+            <i class="fas fa-book me-2"></i>
+            {{ action }} Syllabus
+        </h4>
+    </div>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-8">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-info text-white py-3">
+                    <h5 class="mb-0">
+                        <i class="fas fa-file-alt me-2"></i>
+                        Syllabus Information
+                    </h5>
+                </div>
+                
+                <div class="card-body p-4">
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
+                        
+                        <div class="row g-3">
+                            {{ form|crispy }}
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                            <a href="{% url 'syllabus_list' %}" 
+                               class="btn btn-outline-secondary me-md-2">
+                                Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary px-4">
+                                <i class="fas fa-save me-2"></i> {{ action }} Syllabus
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
 </div>

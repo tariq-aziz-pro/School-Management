@@ -1,11 +1,54 @@
 {% load ui_tags %}
+
 {% if messages %}
-<div class="toast-container position-fixed top-0 end-0 p-3 app-message-stack" style="z-index: 1100; margin-top: 4.5rem; max-width: 22rem;">
+<div class="toast-container position-fixed top-0 end-0 p-3 app-message-stack"
+     style="z-index: 1100; margin-top: 5rem; width: 350px;">
+
     {% for message in messages %}
-        <div class="alert alert-{{ message.tags|message_bootstrap_class }} alert-dismissible fade show shadow-sm app-dismissible-msg mb-2" role="alert">
-            {{ message }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    <div class="alert alert-{{ message.tags|message_bootstrap_class }}
+                alert-dismissible fade show border-0 rounded-4 shadow-sm mb-3 app-auto-dismiss"
+         role="alert">
+
+        <div class="d-flex align-items-start">
+
+            <div class="me-2 pt-1">
+                {% if message.tags == 'success' %}
+                    <i class="fas fa-circle-check text-success"></i>
+                {% elif message.tags == 'error' %}
+                    <i class="fas fa-circle-xmark text-danger"></i>
+                {% elif message.tags == 'warning' %}
+                    <i class="fas fa-triangle-exclamation text-warning"></i>
+                {% else %}
+                    <i class="fas fa-circle-info text-primary"></i>
+                {% endif %}
+            </div>
+
+            <div class="flex-grow-1 pe-3">
+                {{ message }}
+            </div>
+
+            <button type="button"
+                    class="btn-close"
+                    data-bs-dismiss="alert"
+                    aria-label="Close">
+            </button>
+
         </div>
+    </div>
     {% endfor %}
 </div>
+
+<script>
+    // Auto dismiss alerts after 4 seconds
+    setTimeout(() => {
+        document.querySelectorAll('.app-auto-dismiss').forEach((alert) => {
+
+            const bsAlert = bootstrap.Alert.getOrCreateInstance(alert);
+
+            setTimeout(() => {
+                bsAlert.close();
+            }, 100);
+        });
+    }, 4000);
+</script>
 {% endif %}

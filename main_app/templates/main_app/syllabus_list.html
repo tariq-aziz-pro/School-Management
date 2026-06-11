@@ -15,45 +15,36 @@
 {% endblock %}
 
 {% block content %}
-
 <div class="content-area">
+    
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold mb-0">Syllabus</h4>
+        <h4 class="fw-bold mb-0">
+            <i class="fas fa-book me-2"></i> Syllabus Management
+        </h4>
         
         {% if not is_student %}
-        <div>
-            <a href="{% url 'add_syllabus' %}" class="btn btn-success">
-                <i class="fas fa-plus-circle"></i> Add New Syllabus
-            </a>
-        </div>
+        <a href="{% url 'add_syllabus' %}" class="btn btn-success">
+            <i class="fas fa-plus-circle me-2"></i> Add New Syllabus
+        </a>
         {% endif %}
     </div>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
-    <div class="card shadow-sm">
-        <div class="card-header bg-primary text-white">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white py-3">
             <h5 class="mb-0">Available Syllabus</h5>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
-                <table class="table table-hover mb-0">
+                <table class="table table-hover mb-0 align-middle">
                     <thead class="table-light">
                         <tr>
-                            <th>#</th>
+                            <th width="5%">#</th>
                             <th>Subject</th>
                             <th>Class</th>
                             <th>Uploaded By</th>
                             <th>File</th>
                             {% if not is_student %}
-                            <th>Actions</th>
+                            <th width="15%">Actions</th>
                             {% endif %}
                         </tr>
                     </thead>
@@ -66,20 +57,29 @@
                             <td>{{ syllabus.uploaded_by.username|default:"—" }}</td>
                             <td>
                                 {% if syllabus.file %}
-                                    <a href="{{ syllabus.file.url }}" target="_blank" class="btn btn-sm btn-outline-primary">
-                                        <i class="fas fa-download"></i> View / Download
+                                    <a href="{{ syllabus.file.url }}" 
+                                       target="_blank"
+                                       class="btn btn-sm btn-outline-primary me-1">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <a href="{{ syllabus.file.url }}" 
+                                       download
+                                       class="btn btn-sm btn-outline-success">
+                                        <i class="fas fa-download"></i> Download
                                     </a>
                                 {% else %}
-                                    <span class="text-muted">No file attached</span>
+                                    <span class="text-muted small">No file</span>
                                 {% endif %}
                             </td>
                             
                             {% if not is_student %}
                             <td>
-                                <a href="{% url 'edit_syllabus' syllabus.id %}" class="btn btn-sm btn-warning me-1">
+                                <a href="{% url 'edit_syllabus' syllabus.id %}" 
+                                   class="btn btn-sm btn-warning me-1">
                                     <i class="fas fa-edit"></i>
                                 </a>
-                                <button class="btn btn-sm btn-danger" data-bs-toggle="modal" 
+                                <button class="btn btn-sm btn-danger" 
+                                        data-bs-toggle="modal"
                                         data-bs-target="#deleteModal{{ syllabus.id }}">
                                     <i class="fas fa-trash"></i>
                                 </button>
@@ -88,8 +88,10 @@
                         </tr>
                         {% empty %}
                         <tr>
-                            <td colspan="{% if not is_student %}6{% else %}5{% endif %}" class="text-center py-5 text-muted">
-                                No syllabus available.
+                            <td colspan="{% if not is_student %}6{% else %}5{% endif %}" 
+                                class="text-center py-5 text-muted">
+                                <i class="fas fa-folder-open fa-2x mb-2 d-block"></i>
+                                No syllabus available yet.
                             </td>
                         </tr>
                         {% endfor %}
@@ -99,5 +101,4 @@
         </div>
     </div>
 </div>
-
 {% endblock %}

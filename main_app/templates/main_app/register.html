@@ -1,69 +1,55 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-
 {% block title %}Register School{% endblock %}
 
-{% block breadcrumb %}
-<div class="mb-4">
-    <nav aria-label="breadcrumb">
-        <ol class="breadcrumb mb-0">
-            <li class="breadcrumb-item"><a href="{% url 'index' %}">Home</a></li>
-            <li class="breadcrumb-item active">School Registration</li>
-        </ol>
-    </nav>
-</div>
-{% endblock %}
-
 {% block content %}
+<div class="guest-main">
+    <div class="container">
+    <div class="col-lg-9 col-xl-8 mx-auto">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white text-center py-4">
+                <h3 class="mb-1">School Registration</h3>
+                <p class="mb-0 opacity-75">Join PowerLink and manage your school digitally</p>
+            </div>
+            <div class="card-body p-5">
+                
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
 
-<div class="content-area">
-    <div class="row justify-content-center">
-        <div class="col-lg-9">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white text-center py-3">
-                    <h4 class="mb-0">School Registration</h4>
-                    <p class="mb-0 opacity-75">Join PowerLink and manage your school digitally</p>
-                </div>
-                <div class="card-body p-5">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
                     
-                    {% if messages %}
-                        {% for message in messages %}
-                            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                                {{ message }}
-                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                            </div>
-                        {% endfor %}
-                    {% endif %}
-
-                    <form method="post" enctype="multipart/form-data">
-                        {% csrf_token %}
+                    <div class="row g-4">
+                        <div class="col-md-6">{{ form.school_name|as_crispy_field }}</div>
+                        <div class="col-md-6">{{ form.school_logo|as_crispy_field }}</div>
                         
-                        <div class="row g-4">
-                            <div class="col-md-6">{{ form.school_name|as_crispy_field }}</div>
-                            <div class="col-md-6">{{ form.school_logo|as_crispy_field }}</div>
-                            
-                            <div class="col-md-6">{{ form.city|as_crispy_field }}</div>
-                            <div class="col-md-6">{{ form.owner_name|as_crispy_field }}</div>
-                            
-                            <div class="col-md-6">{{ form.contact_number|as_crispy_field }}</div>
-                            <div class="col-md-6">{{ form.number_of_students|as_crispy_field }}</div>
-                            
-                            <div class="col-md-6">{{ form.username|as_crispy_field }}</div>
-                            <div class="col-md-6">{{ form.email|as_crispy_field }}</div>
-                            
-                            <div class="col-md-6">{{ form.password1|as_crispy_field }}</div>
-                            <div class="col-md-6">{{ form.password2|as_crispy_field }}</div>
-                        </div>
+                        <div class="col-md-6">{{ form.city|as_crispy_field }}</div>
+                        <div class="col-md-6">{{ form.owner_name|as_crispy_field }}</div>
+                        
+                        <div class="col-md-6">{{ form.contact_number|as_crispy_field }}</div>
+                        <div class="col-md-6">{{ form.number_of_students|as_crispy_field }}</div>
+                        
+                        <div class="col-md-6">{{ form.username|as_crispy_field }}</div>
+                        <div class="col-md-6">{{ form.email|as_crispy_field }}</div>
+                        
+                        <div class="col-md-6">{{ form.password1|as_crispy_field }}</div>
+                        <div class="col-md-6">{{ form.password2|as_crispy_field }}</div>
+                    </div>
 
-                        <div class="mt-5 text-end">
-                            <a href="{% url 'index' %}" class="btn btn-secondary me-3 px-4">Cancel</a>
-                            <button type="submit" class="btn btn-primary px-5">Register School</button>
-                        </div>
-                    </form>
-                </div>
+                    <div class="mt-5 text-end">
+                        <a href="{% url 'index' %}" class="btn btn-secondary px-4">Cancel</a>
+                        <button type="submit" class="btn btn-primary px-5">Register School</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
 </div>
-
+</div>
 {% endblock %}

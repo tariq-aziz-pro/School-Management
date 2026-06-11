@@ -1,58 +1,76 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
+
 {% block content %}
 <div class="container mt-4">
     <h2>{{ title }}</h2>
+    
     <form method="post" class="form" id="expenseForm">
         {% csrf_token %}
-        {{ form|crispy }}
-        <button type="submit" class="btn btn-primary">Save</button>
-        <a href="{% url 'expenses_list' %}" class="btn btn-secondary">Cancel</a>
+        
+        <div class="row g-3">
+            <div class="col-md-6">{{ form.expense_type|as_crispy_field }}</div>
+            <div class="col-md-6">{{ form.expense_name|as_crispy_field }}</div>
+            
+            <div class="col-md-6">{{ form.price|as_crispy_field }}</div>
+            <div class="col-md-6">{{ form.payment_date|as_crispy_field }}</div>
+            
+            <div class="col-md-6">{{ form.payment_by|as_crispy_field }}</div>
+            <div class="col-md-6">{{ form.file_number|as_crispy_field }}</div>
+            
+            <div class="col-md-6">{{ form.period|as_crispy_field }}</div>
+            
+            <div class="col-12">{{ form.description|as_crispy_field }}</div>
+        </div>
+
+        <div class="mt-4">
+            <button type="submit" class="btn btn-primary">Save Expense</button>
+            <a href="{% url 'expenses_list' %}" class="btn btn-secondary">Cancel</a>
+        </div>
     </form>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const expenseTypeField = document.querySelector('#id_expense_type');
-    const expenseNameField = document.querySelector('#id_expense_name');
-    const periodLabel = document.querySelector('label[for="id_period"]');
-    const periodField = document.querySelector('#id_period');
 
-    const monthlyChoices = [
-        {% for name, _ in form.fields.expense_name.choices %}
-            {% if name not in 'Stationary,Food' %}'{{ name }}',{% endif %}
-        {% endfor %}
-    ];
-    const dailyChoices = ['Stationary', 'Food'];
-
-    function updateFormFields() {
-        const expenseType = expenseTypeField.value;
-        // Update expense_name choices
-        expenseNameField.innerHTML = '';
-        const choices = expenseType === 'Daily' ? dailyChoices : monthlyChoices;
-        choices.forEach(choice => {
-            const option = document.createElement('option');
-            option.value = choice;
-            option.text = choice;
-            if (choice === '{{ form.expense_name.value|default_if_none:"" }}') {
-                option.selected = true;
-            }
-            expenseNameField.appendChild(option);
+    // ====================== DISABLE MOUSE WHEEL ON NUMBER FIELDS ======================
+    function disableMouseWheel() {
+        const numberInputs = document.querySelectorAll('input[type="number"]');
+        numberInputs.forEach(input => {
+            input.addEventListener('wheel', function(e) {
+                e.preventDefault();
+                this.blur();                    // Remove focus to prevent change
+            }, { passive: false });
         });
-        // Update period label and placeholder
-        if (expenseType === 'Daily') {
-            periodLabel.textContent = 'Day Name';
-            periodField.placeholder = 'e.g., Monday';
-        } else {
-            periodLabel.textContent = 'Month Name';
-            periodField.placeholder = 'e.g., January';
+    }
+
+    // Apply immediately and also after any dynamic changes
+    disableMouseWheel();
+
+    // ====================== DYNAMIC PERIOD FIELD (Month / Day) ======================
+    const expenseTypeField = document.getElementById('id_expense_type');
+    
+    function updatePeriodLabel() {
+        const periodLabel = document.querySelector('label[for="id_period"]');
+        if (periodLabel) {
+            if (expenseTypeField.value === 'Daily') {
+                periodLabel.textContent = 'Day Name';
+            } else {
+                periodLabel.textContent = 'Month Name';
+            }
         }
     }
 
-    // Initial setup
-    updateFormFields();
-    // Update on change
-    expenseTypeField.addEventListener('change', updateFormFields);
+    // Initial update
+    updatePeriodLabel();
+
+    // Update when Expense Type changes
+    expenseTypeField.addEventListener('change', function() {
+        updatePeriodLabel();
+        // Optional: Auto submit to refresh choices (if you want backend refresh)
+        // this.form.submit();
+    });
+
 });
 </script>
 {% endblock %}

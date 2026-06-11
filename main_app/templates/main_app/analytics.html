@@ -1,120 +1,173 @@
 {% extends 'main_app/analytics_base.html' %}
 {% load static %}
-{% load crispy_forms_tags %}
-
 
 {% block analytics_content %}
-<div class="container mt-4">
-    <h3 class="mb-3">📊 School Data Analysis</h3>
-
-    <form method="get" class="row mb-4">
-    <div class="col-md-4">
-        <label for="session">📘 Select Academic Session:</label>
-        <select name="session" id="session" class="form-control" onchange="this.form.submit()">
-            {% for session in all_sessions %}
-                <option value="{{ session.id }}" {% if session.id == selected_session.id %}selected{% endif %}>
-                    {{ session.session_name }}
-                </option>
-            {% endfor %}
-        </select>
-    </div>
-</form>
-
-
-    <form method="post" id="analytics-form" class="border p-4 rounded shadow-sm bg-light">
-        {% csrf_token %}
-
-        <div class="row mb-3">
-            <div class="col-md-4">
-                {{ form.model_name.label_tag }}
-                {{ form.model_name }}
-            </div>
-            <div class="col-md-4">
-                {{ form.x_axis.label_tag }}
-                {{ form.x_axis }}
-            </div>
-            <div class="col-md-4">
-                {{ form.y_axis.label_tag }}
-                {{ form.y_axis }}
-            </div>
-        </div>
-
-        <div class="row mb-3">
-            <div class="col-md-4">
-                {{ form.chart_type.label_tag }}
-                {{ form.chart_type }}
-            </div>
-            <div class="col-md-4 d-flex align-items-end">
-                <button type="submit" class="btn btn-primary">Generate Chart</button>
-            </div>
-        </div>
-    </form>
-
-    <div class="mt-5">
-        {% if chart %}
-        <div class="mt-4">
-            {{ chart|safe }}
-        </div>
-    {% endif %}
-   </div>
-
-    {% if pie_chart %}
-    <div class="mt-5">
-        <h4>🎯 Student Distribution</h4>
-        {{ pie_chart|safe }}
-    </div>
-{% endif %}
-
-{% if bar_chart %}
-    <div class="mt-5">
-        <h4>💰 Financial Summary</h4>
-        {{ bar_chart|safe }}
-    </div>
-{% endif %}
-
-{% if trend_chart %}
-    <div class="mt-5">
-        <h4>📈 School Progress Trend</h4>
-        {{ trend_chart|safe }}
-    </div>
-{% endif %}
-
-
+<div class="content-area">
     
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="fw-bold mb-0">
+            <i class="fas fa-chart-line me-2 text-primary"></i> 
+            School Analytics & Insights
+        </h4>
+    </div>
+
+    <!-- Session Selector -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get">
+                <div class="row align-items-end">
+                    <div class="col-md-5">
+                        <label class="form-label fw-semibold">Academic Session</label>
+                        <select name="session" class="form-select" onchange="this.form.submit()">
+                            {% for session in all_sessions %}
+                                <option value="{{ session.id }}"
+                                        {% if selected_session and session.id == selected_session.id %}selected{% endif %}>
+                                    {{ session.session_name }} 
+                                    ({{ session.start_date|date:"M Y" }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ====================== PRE-BUILT INSIGHTS ====================== -->
+    <h5 class="mb-3 text-muted">📊 Key School Insights</h5>
+    <div class="row g-4">
+        
+        {% if pie_chart %}
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">🎯 Student Distribution by Class</h5>
+                </div>
+                <div class="card-body p-4">
+                    {{ pie_chart|safe }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if bar_chart %}
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">💰 Financial Overview</h5>
+                </div>
+                <div class="card-body p-4">
+                    {{ bar_chart|safe }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if trend_chart %}
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">📈 Fee Collection Trend Over Time</h5>
+                </div>
+                <div class="card-body p-4">
+                    {{ trend_chart|safe }}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <!-- ====================== CUSTOM CHART GENERATOR (Moved to Bottom) ====================== -->
+    <div class="mt-5">
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-magic me-2"></i> Custom Chart Generator
+                </h5>
+            </div>
+            <div class="card-body p-4">
+                <form method="post" id="analytics-form">
+                    {% csrf_token %}
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            {{ form.model_name.label_tag }}
+                            {{ form.model_name }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ form.x_axis.label_tag }}
+                            {{ form.x_axis }}
+                        </div>
+                        <div class="col-md-4">
+                            {{ form.y_axis.label_tag }}
+                            {{ form.y_axis }}
+                        </div>
+                    </div>
+                    
+                    <div class="row g-3 mt-3">
+                        <div class="col-md-4">
+                            {{ form.chart_type.label_tag }}
+                            {{ form.chart_type }}
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <button type="submit" class="btn btn-primary px-5 py-2">
+                                <i class="fas fa-chart-bar me-2"></i> Generate Chart
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Generated Custom Chart -->
+        {% if chart %}
+        <div class="card shadow-sm mt-4">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">Your Generated Chart</h5>
+            </div>
+            <div class="card-body p-4 text-center">
+                {{ chart|safe }}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
 </div>
 
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-    $('#id_model_name').change(function () {
+$(document).ready(function() {
+    $('#id_model_name').change(function() {
         const modelName = $(this).val();
+        const xSelect = $('#id_x_axis');
+        const ySelect = $('#id_y_axis');
+        
+        xSelect.html('<option value="">Loading...</option>');
+        ySelect.html('<option value="">Loading...</option>');
+
         if (modelName) {
             $.ajax({
                 url: "{% url 'get_model_fields' %}",
-                data: {
-                    model_name: modelName
-                },
-                success: function (data) {
-                    const xSelect = $('#id_x_axis');
-                    const ySelect = $('#id_y_axis');
-
-                    xSelect.empty();
-                    ySelect.empty();
-
+                data: { model_name: modelName },
+                success: function(data) {
+                    xSelect.empty().append(new Option('Select X Axis', ''));
+                    ySelect.empty().append(new Option('Select Y Axis', ''));
+                    
                     if (data.fields && data.fields.length > 0) {
-                        data.fields.forEach(function (field) {
-                            xSelect.append(new Option(field, field));
-                            ySelect.append(new Option(field, field));
+                        data.fields.forEach(function(field) {
+                            const label = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                            xSelect.append(new Option(label, field));
+                            ySelect.append(new Option(label, field));
                         });
-                    } else {
-                        xSelect.append(new Option('No fields found', ''));
-                        ySelect.append(new Option('No fields found', ''));
                     }
                 },
-                error: function () {
-                    alert("Error loading model fields.");
+                error: function() {
+                    xSelect.html('<option value="">Error loading fields</option>');
+                    ySelect.html('<option value="">Error loading fields</option>');
                 }
             });
         }
     });
+});
 </script>
 {% endblock %}

@@ -14,7 +14,7 @@ from .models import CustomUser, AcademicSession, FeeStructure, CLASS_CHOICES, SE
 import uuid
 import os
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse, HttpResponse
+from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.views.decorators.http import require_GET
 from decimal import Decimal
 from django.db import IntegrityError
@@ -33,11 +33,11 @@ from django.urls import reverse
 from urllib.parse import urlencode
 import json
 from django.core.exceptions import ValidationError
-from django.contrib.auth.backends import ModelBackend
 from django.contrib.auth.forms import AuthenticationForm
 import logging
 from django.db.models.functions import Coalesce
 from django.db.models import Value as V
+from .view_helpers import bulk_promote_students, create_repeated_admission, get_previous_balance, calculate_overall_grade
 
 from django.apps import apps
 from plotly.offline import plot
@@ -61,497 +61,45 @@ from .permissions import (
     student_required,
     teacher_required,
 )
+from .view_parts.auth import (
+    custom_login,
+    register_school,
+    developer_dashboard,
+    toggle_school_access,
+    reset_admin_password,
+    add_payment,
+    index,
+)
+from .view_parts.admissions import (
+    student_user_create,
+    student_list,
+    student_dashboard,
+    student_admission,
+    edit_student,
+    admission_success,
+    generate_pdf,
+    list_admissions,
+)
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
+import datetime
+from decimal import Decimal
+from django.db import transaction
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.urls import reverse
+from django.utils.http import urlencode
+
+from .models import AcademicSession, StudentAdmission, FeeStructure, MonthlyFee, CLASS_PROGRESSION
+from .forms import PromoteExistingStudentForm
+from .utils import get_pending_balance
 logger = logging.getLogger(__name__)
 
 
-#------------------Helper class and Functions--------------
-
-class CustomAuthBackend(ModelBackend):
-    def authenticate(self, request, username=None, password=None, **kwargs):
-        user = super().authenticate(request, username, password, **kwargs)
-        if (
-            user
-            and getattr(user, "user_type", None) in (1, 2, 3)
-            and user.school
-            and not user.school.is_active
-        ):
-            if request:
-                messages.error(
-                    request,
-                    "Your account is blocked by the Powerlink Team due to payment issues.",
-                )
-            return None
-        return user
-
-
-def custom_login(request):
-    # If user is already logged in → redirect based on role
-    if request.user.is_authenticated:
-        logger.info(
-            f"Already authenticated user {request.user.username} (Type: {request.user.user_type}) redirected."
-        )
-
-        if is_developer(request.user) and request.user.user_type != 1:
-            return redirect("developer_dashboard")
-        elif is_school_staff(request.user):
-            return redirect("dashboard")
-        elif is_teacher(request.user):
-            return redirect("teacher_dashboard")
-        elif is_student(request.user):
-            return redirect("student_dashboard")
-        else:
-            return redirect("index")  # Fallback (e.g. unclassified account)
-
-    # Handle login form submission
-    if request.method == "POST":
-        form = AuthenticationForm(request, data=request.POST)
-        if form.is_valid():
-            user = form.get_user()
-            login(request, user)
-            logger.info(
-                f"Login successful: {user.username} (Type: {user.user_type})"
-            )
-
-            # Respect 'next' parameter first (most important)
-            next_url = request.GET.get("next")
-            if next_url and next_url != "/logout/" and next_url.startswith("/"):
-                return redirect(next_url)
-
-            # Role-based redirect
-            if is_developer(user) and user.user_type != 1:
-                return redirect("developer_dashboard")
-            elif is_school_staff(user):
-                return redirect("dashboard")
-            elif is_teacher(user):
-                return redirect("teacher_dashboard")
-            elif is_student(user):
-                return redirect("student_dashboard")
-            else:
-                return redirect("index")
-        else:
-            messages.error(request, "Invalid username or password.")
-            logger.warning(f"Login failed: {form.errors}")
-    else:
-        form = AuthenticationForm()
-
-    return render(request, "main_app/login.html", {"form": form})
-
-def get_previous_balance(student_admission, active_session):
-    """Get carried forward balance from the last month of previous session."""
-    previous_session = AcademicSession.objects.filter(
-        school=student_admission.student.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
-    ).order_by('-end_date').first()
-
-    if not previous_session:
-        return Decimal('0.00')
-
-    last_month = previous_session.end_date.strftime('%B')
-    last_year = previous_session.end_date.year
-
-    # Try exact last month first
-    last_fee = MonthlyFee.objects.filter(
-        student_admission=student_admission,
-        month=last_month,
-        year=last_year
-    ).order_by('-id').first()
-
-    if not last_fee:
-        # Fallback to most recent fee in previous session
-        last_fee = MonthlyFee.objects.filter(
-            student_admission=student_admission,
-            student_admission__academic_session=previous_session
-        ).order_by('-year', '-id').first()
-
-    return last_fee.current_balance if last_fee else Decimal('0.00')
-
-
-def create_repeated_admission(student_admission, active_session, roll_number, operator):
-    """Create a new admission for a student who is repeating the class (Not Promoted)."""
-    previous_balance = get_previous_balance(student_admission, active_session)
-
-    # Calculate total dues
-    fee_total = (
-        student_admission.tuition_fee +
-        student_admission.exam_fee +
-        student_admission.book_fee +
-        student_admission.uniform_fee +
-        (student_admission.other_fee or Decimal('0.00')) +
-        student_admission.promotion_fee +
-        (student_admission.transport_fee or Decimal('0.00')) -
-        (student_admission.discount or Decimal('0.00'))
-    )
-
-    total_dues = previous_balance + fee_total
-
-    return StudentAdmission(
-        student=student_admission.student,
-        academic_session=active_session,
-        class_name=student_admission.class_name,
-        roll_number=roll_number,
-        section=student_admission.section,
-        admission_date=datetime.date.today(),
-        class_teacher=student_admission.class_teacher,
-        admission_fee=Decimal('0.00'),
-        tuition_fee=student_admission.tuition_fee,
-        exam_fee=student_admission.exam_fee,
-        book_fee=student_admission.book_fee,
-        uniform_fee=student_admission.uniform_fee,
-        other_fee=student_admission.other_fee or Decimal('0.00'),
-        promotion_fee=student_admission.promotion_fee,
-        transport=student_admission.transport,
-        vehicle_no=student_admission.vehicle_no,
-        route=student_admission.route,
-        driver_contact=student_admission.driver_contact,
-        transport_fee=student_admission.transport_fee or Decimal('0.00'),
-        discount=student_admission.discount or Decimal('0.00'),
-        discount_behalf=student_admission.discount_behalf,
-        total_dues=total_dues,
-        received=Decimal('0.00'),
-        balance=total_dues,
-        status=True,
-        promoted=True,
-        failed_to_promote=True,
-        operator=operator
-    )
-
-
-#----------------Student User-----------------------------
-@school_staff_required
-def student_user_create(request):
-    
-    if request.method == 'POST':
-        form = StudentUserForm(request.POST, school=request.user.school)
-        if form.is_valid():
-            try:
-                # Verify StudentAdmission exists for active session
-                student_id = form.cleaned_data['student_id']
-                student = Student.objects.get(student_id=student_id, school=request.user.school)
-                active_session = get_active_session(request)
-                if not active_session:
-                    messages.error(request, "No active academic session found. Please create one.")
-                    logger.error(f"No active AcademicSession for school: {request.user.school}")
-                    return redirect('student_user_create')
-                admission = StudentAdmission.objects.filter(student=student, academic_session=active_session).first()
-                if not admission:
-                    messages.error(request, f"No admission record found for {student_id} in the current session.")
-                    logger.error(f"No StudentAdmission for student: {student_id}, session: {active_session.session_name}")
-                    return redirect('student_user_create')
-                
-                user, plain_password = form.save()
-                messages.success(request, f"Student account for {user.username} created successfully. Temporary password: {plain_password} — please note it down now.")
-                logger.info(f"Student account created by admin {request.user.username}: Username={user.username}")
-                return redirect('student_list')
-            except Exception as e:
-                messages.error(request, f"Error creating student account: {str(e)}")
-                logger.error(f"Error in student_user_create: {str(e)}")
-        else:
-            messages.error(request, "Please correct the errors below.")
-            logger.debug(f"StudentUserForm errors: {form.errors.as_json()}")
-    else:
-        form = StudentUserForm(school=request.user.school)
-    
-    return render(request, 'main_app/student_user_create.html', {'form': form})
-
-@school_staff_required
-def student_list(request):
-    active_session = get_active_session(request)
-
-    admissions = StudentAdmission.objects.filter(
-        student__school=request.user.school
-    ).select_related('student', 'academic_session').order_by('student__student_id')
-
-    if active_session:
-        admissions = admissions.filter(academic_session=active_session)
-
-    # Filters
-    if class_filter := request.GET.get('class_assigned'):
-        admissions = admissions.filter(class_name=class_filter)
-    if section_filter := request.GET.get('section'):
-        admissions = admissions.filter(section=section_filter)
-    if student_id_filter := request.GET.get('student_id'):
-        admissions = admissions.filter(student__student_id__icontains=student_id_filter)
-
-    # Pagination
-    paginator = Paginator(admissions, 50)  # 50 records per page
-    page_number = request.GET.get('page')
-    try:
-        admissions_page = paginator.get_page(page_number)
-    except (PageNotAnInteger, EmptyPage):
-        admissions_page = paginator.get_page(1)
-
-    # Get student_ids for this page only (much more efficient)
-    student_ids = [adm.student.student_id for adm in admissions_page]
-
-    users = CustomUser.objects.filter(
-        username__in=student_ids
-    ).select_related('temporary_password')
-
-    user_map = {user.username: user for user in users}
-
-    student_data = []
-    for admission in admissions_page:
-        user = user_map.get(admission.student.student_id)
-        temp_password = getattr(user, 'temporary_password', None) if user else None
-
-        student_data.append({
-            'student_id': admission.student.student_id,
-            'class_assigned': admission.class_name,
-            'section': admission.section,
-            'username': user.username if user else 'N/A',
-            'password': temp_password.password if temp_password else 'Pending',
-            'account_status': 'Created' if user else 'Pending',
-        })
-
-    context = {
-        'student_data': student_data,
-        'page_obj': admissions_page,
-        'paginator': paginator,
-        'classes': StudentAdmission.objects.filter(student__school=request.user.school)
-                        .values_list('class_name', flat=True).distinct().order_by('class_name'),
-        'sections': StudentAdmission.objects.filter(student__school=request.user.school)
-                        .values_list('section', flat=True).distinct().order_by('section'),
-        'active_session': active_session,
-    }
-
-    return render(request, 'main_app/student_list.html', context)
-
-
-#-------------------------Student Dashbaord--------------------------
-@student_required
-def student_dashboard(request):
-    try:
-        student = Student.objects.select_related('school').get(student_id=request.user.username)
-    except Student.DoesNotExist:
-        messages.error(request, "Student profile not found.")
-        return render(request, 'main_app/student_dashboard.html', {
-            'student': None, 'results': [], 'fees': [], 'syllabus': [], 'announcements': []
-        })
-
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active academic session found.")
-        return render(request, 'main_app/student_dashboard.html', {
-            'student': student, 'results': [], 'fees': [], 'syllabus': [], 'announcements': []
-        })
-
-    # Optimized queries
-    admission = StudentAdmission.objects.select_related('student').filter(
-        student=student, 
-        academic_session=active_session
-    ).first()
-
-    if not admission:
-        messages.error(request, "No admission record found for the current session.")
-        return render(request, 'main_app/student_dashboard.html', {
-            'student': student, 'results': [], 'fees': [], 'syllabus': [], 'announcements': []
-        })
-
-    # Get filter parameters
-    exam_type_filter = request.GET.get('exam_type')
-    subject_filter = request.GET.get('subject')
-
-    # Optimized results query
-    results_qs = StudentResult.objects.filter(
-        student_admission=admission
-    ).select_related('subject', 'student_admission')
-
-    if exam_type_filter:
-        results_qs = results_qs.filter(exam_type=exam_type_filter)
-    if subject_filter:
-        results_qs = results_qs.filter(subject__id=subject_filter)
-
-    results = results_qs.order_by('subject__name', 'exam_type')
-
-    class_teacher = Teacher.objects.filter(
-        class_name=admission.class_name,
-        section=admission.section,
-        school=student.school
-    ).first()
-
-    result_data = [
-        {
-            'subject_name': result.subject.name,
-            'exam_type': result.exam_type,
-            'teacher_name': class_teacher.name if class_teacher else 'N/A',
-            'total_marks': result.total_marks,
-            'obtained_marks': result.obtained_marks,
-            'percentage': result.percentage,
-            'grade': result.grade,
-        } for result in results
-    ]
-
-    # Monthly Fees - optimized
-    fees = MonthlyFee.objects.filter(
-        student_admission=admission
-    ).order_by('year', 'month')
-
-    fee_data = [
-        {
-            'id': fee.id,
-            'month': fee.month,
-            'monthly_fee': fee.monthly_fee,
-            'status': 'Paid' if fee.has_payment else 'Unpaid',
-            'due_date': fee.payment_date,
-            'balance': fee.current_balance,
-        } for fee in fees
-    ]
-
-    # Syllabus & Announcements
-    syllabus = Syllabus.objects.filter(
-        academic_session=active_session,
-        class_name=admission.class_name
-    ).select_related('subject')
-
-    announcements = Announcement.objects.filter(school=student.school).order_by('-created_at')
-    events = Events.objects.filter(
-        school=student.school, 
-        event_for__in=['All', 'Students']
-    ).order_by('event_date')
-
-    context = {
-        'student': student,
-        'admission': admission,
-        'results': result_data,
-        'fees': fee_data,
-        'syllabus': syllabus,
-        'announcements': announcements,
-        'events': events,
-        'exam_types': results_qs.values_list('exam_type', flat=True).distinct(),
-        'subjects': Subject.objects.filter(studentresult__student_admission=admission).distinct(),
-        'active_session': active_session,
-        'class_teacher': class_teacher,
-        'chart_data': {
-            'labels': [r['subject_name'] + ' (' + r['exam_type'] + ')' for r in result_data],
-            'marks': [r['obtained_marks'] for r in result_data],
-            'total_marks': [r['total_marks'] for r in result_data],
-        },
-        'selected_exam_type': exam_type_filter,
-        'selected_subject': subject_filter,
-    }
-
-    return render(request, 'main_app/student_dashboard.html', context)
-
-
-
-#------------------------Developer Dashbaord--------------------
-@developer_required
-def developer_dashboard(request):
-    schools = School.objects.all().select_related('admin_user').prefetch_related('subscriptions')
-    total_schools = schools.count()
-    active_schools = schools.filter(is_active=True).count()
-    total_students = sum(school.number_of_students for school in schools)
-    pending_payments = SchoolSubscription.objects.filter(is_valid=False).count()
-    schools_with_sub = []
-    for school in schools:
-        latest_sub = school.subscriptions.order_by('-payment_date').first()
-        schools_with_sub.append({
-            'school': school,
-            'latest_sub': latest_sub,
-        })
-    context = {
-        'schools_with_sub': schools_with_sub,
-        'total_schools': total_schools,
-        'active_schools': active_schools,
-        'total_students': total_students,
-        'pending_payments': pending_payments,
-    }
-    return render(request, 'main_app/developer_dashboard.html', context)
-
-@developer_required
-def toggle_school_access(request, school_id):
-    # Get school object or 404 if not found
-    school = get_object_or_404(School, id=school_id)
-
-    # Toggle status
-    old_status = school.is_active
-    school.is_active = not school.is_active
-    school.save(update_fields=['is_active'])  # Save only the changed field
-
-    # Log change
-    logger.debug(
-        f"User: {request.user} toggled {school.school_name} "
-        f"from {old_status} to {school.is_active}"
-    )
-
-    # Show confirmation to user
-    messages.success(
-        request,
-        f"{school.school_name} access {'enabled' if school.is_active else 'disabled'}."
-    )
-
-    return redirect('developer_dashboard')
-
-
-#-------------------Reset Admin Pass--------------------------------
-@developer_required
-def reset_admin_password(request, school_id):
-    school = get_object_or_404(School, id=school_id)
-    admin = school.admin_user
-    if request.method == 'POST':
-        new_password = request.POST.get('new_password')
-        if new_password and len(new_password) >= 8:
-            admin.set_password(new_password)
-            admin.save()
-            messages.success(request, f"Password reset for {admin.username}.")
-            return redirect('developer_dashboard')
-        else:
-            messages.error(request, "Password must be at least 8 characters long.")
-    return render(request, 'main_app/reset_password.html', {'admin': admin, 'school': school})
-
-
-#----------------------------Pyments----------------------------
-@developer_required
-def add_payment(request, school_id):
-    school = get_object_or_404(School, id=school_id)
-    if request.method == 'POST':
-        form = SchoolSubscriptionForm(request.POST)
-        if form.is_valid():
-            subscription = form.save(commit=False)
-            subscription.school = school
-            subscription.is_valid = True
-            subscription.save()
-            messages.success(request, f"Payment added for {school.school_name}.")
-            return redirect('developer_dashboard')
-        else:
-            messages.error(request, "Please correct the errors below.")
-    else:
-        form = SchoolSubscriptionForm()
-    return render(request, 'main_app/add_payment.html', {'school': school, 'form': form})
-
-
-#---------------------------Regster School----------------------
-def register_school(request):
-    if request.method == 'POST':
-        form = SchoolRegisterForm(request.POST, request.FILES)
-        if form.is_valid():
-            try:
-                user = form.save()  # ← form handles everything now
-                login(request, user)
-                messages.success(request, f"School '{user.school.school_name}' registered successfully.")
-                logger.info(f"School registered: Username={user.username}, School={user.school.school_name}")
-                return redirect('dashboard')
-            except Exception as e:
-                messages.error(request, f"Failed to register school: {str(e)}")
-                logger.error(f"Registration error: {str(e)}")
-        else:
-            messages.error(request, 'Please correct the errors below.')
-            logger.debug(f"Form errors: {form.errors}")
-    else:
-        form = SchoolRegisterForm()
-    return render(request, 'main_app/register.html', {'form': form})
-
-
-
-
-#---------------Admin Dashboard---------------------
 @school_staff_required
 def dashboard(request):
     active_session = get_active_session(request)
-    
     context = {
         'session_exists': AcademicSession.objects.filter(school=request.user.school).exists(),
         'active_session': active_session,
@@ -577,7 +125,7 @@ def dashboard(request):
             student_admission__student__school=request.user.school,
         ).aggregate(total=Sum('current_balance'))
 
-        # Search functionality (your original logic preserved)
+        # Search functionality
         search_results = []
         search_type = request.GET.get('search_type', request.session.get('search_type', ''))
         search_value = request.GET.get('search_value', request.session.get('search_value', '')).strip().lower()
@@ -618,114 +166,32 @@ def dashboard(request):
     return render(request, 'main_app/dashboard.html', context)
 
 
-
-
-
 @school_staff_required
 def create_academic_session(request):
-    logger.debug(f"Create session: User={request.user}, Superuser={request.user.is_superuser}, UserType={request.user.user_type}, School={request.user.school}")
-    if not request.user.school:
-        logger.error("User has no associated school.")
-        messages.error(request, "No school associated with your account.")
-        return redirect('dashboard')
-
+    active_session = get_active_session(request)
     if request.method == 'POST':
         form = AcademicSessionForm(request.POST, request=request)
         if form.is_valid():
             session = form.save(commit=False)
-            session.school = request.user.school  # Set school before validation
+            session.school = request.user.school
             session.save()
-            logger.info(f"Session {session.session_name} created for school {session.school}")
-            messages.success(request, f"Academic session {session.session_name} created successfully.")
-            return redirect('add_fee_structure')
-
-        else:
-            logger.error(f"Form errors: {form.errors}")
+            messages.success(request, 'Academic session created successfully.')
+            return redirect('create_session')
     else:
         form = AcademicSessionForm(request=request)
-    return render(request, 'main_app/create_session.html', {'form': form})
+
+    sessions = AcademicSession.objects.filter(school=request.user.school).order_by('-start_date')
+    return render(request, 'main_app/create_session.html', {'form': form, 'sessions': sessions, 'active_session': active_session})
 
 
 @school_staff_required
 def search_session(request):
-    user = request.user
-    
-    # Ensure the logged-in user has a school
-    if not hasattr(user, 'school') or not user.school:
-        logger.error(f"User {user} has no associated school.")
-        return render(request, 'error.html', {'message': 'No school assigned to user.'})
+    query = request.GET.get('q', '').strip()
+    sessions = AcademicSession.objects.filter(school=request.user.school).order_by('-start_date')
+    if query:
+        sessions = sessions.filter(name__icontains=query)
+    return render(request, 'main_app/search_session.html', {'sessions': sessions, 'query': query})
 
-    school = user.school
-    logger.debug(f"Searching sessions for User={user}, School={school}")
-
-    # Get all sessions for the school
-    sessions = AcademicSession.objects.filter(school=school).order_by('-start_date')
-
-    if not sessions.exists():
-        logger.error(f"No sessions found for {school}.")
-        return render(request, 'main_app/search_session.html', {
-            'message': 'No academic sessions found for this school.'
-        })
-
-    # === Queries that run ONLY ONCE (outside the loop) ===
-    teacher_salaries = Teacher.objects.filter(school=school).aggregate(
-        total=Sum('salary')
-    )['total'] or 0
-
-    staff_salaries = Staff.objects.filter(school=school).aggregate(
-        total=Sum('salary')
-    )['total'] or 0
-
-    session_data = []
-
-    for session in sessions:
-        start_date = session.start_date
-        end_date = session.end_date
-
-        # Combined student statistics
-        student_stats = StudentAdmission.objects.filter(
-            academic_session=session,
-            student__school=school
-        ).aggregate(
-            total_students=Count('id'),
-            total_classes=Count('class_name', distinct=True),
-        )
-
-        # Students by class breakdown (needed for template display)
-        students_by_class = StudentAdmission.objects.filter(
-            academic_session=session,
-            student__school=school
-        ).values('class_name').annotate(count=Count('id')).order_by('class_name')
-
-        # Fee collected in this session
-        fee_stats = MonthlyFee.objects.filter(
-            student_admission__academic_session=session,
-            student_admission__student__school=school
-        ).aggregate(
-            total_fee=Sum('received'),
-            total_balance=Sum('current_balance')
-        )
-
-        # Expenses in this session
-        total_expenses = Expenses.objects.filter(
-            school=school,
-            payment_date__range=(start_date, end_date)
-        ).aggregate(total=Sum('price'))['total'] or 0
-
-        session_data.append({
-            'session': session,
-            'student_count': student_stats['total_students'],
-            'students_by_class': students_by_class,
-            'total_fee': fee_stats['total_fee'] or 0,
-            'total_balance': fee_stats['total_balance'] or 0,
-            'teacher_salaries': teacher_salaries,
-            'staff_salaries': staff_salaries,
-            'total_expenses': total_expenses,
-        })
-
-    return render(request, 'main_app/search_session.html', {
-        'session_data': session_data
-    })
 
 @school_staff_required
 def add_fee_structure(request):
@@ -733,20 +199,31 @@ def add_fee_structure(request):
     if not active_session:
         messages.error(request, "No active session found. Please create an active session first.")
         return redirect('dashboard')
+
     if request.method == 'POST':
         form = FeeStructureForm(request.POST)
         if form.is_valid():
             class_name = form.cleaned_data['class_name']
-            if FeeStructure.objects.filter(academic_session=active_session, class_name=class_name).exists():
-                messages.warning(request, f"Fee structure for {class_name} already exists for this session. Please edit it instead.")
+
+            # Check if already exists
+            if FeeStructure.objects.filter(
+                academic_session=active_session, 
+                class_name=class_name
+            ).exists():
+                messages.warning(request, f"Fee structure for {class_name} already exists for this session.")
                 return redirect('add_fee_structure')
+
             fee_structure = form.save(commit=False)
+            fee_structure.school = request.user.school
             fee_structure.academic_session = active_session
             fee_structure.save()
+
             messages.success(request, "Fee structure added successfully!")
             return redirect('add_fee_structure')
+
     else:
         form = FeeStructureForm()
+
     existing_fees = FeeStructure.objects.filter(academic_session=active_session)
     return render(request, 'main_app/add_fee_structure.html', {
         'form': form,
@@ -754,9 +231,49 @@ def add_fee_structure(request):
         'active_session': active_session,
     })
 
+#------------------------Monthly Fee------------------------
+@school_staff_required
+def monthly_fee(request):
+    active_session = get_active_session(request)
+    if not active_session:
+        messages.error(request, "No active session found.")
+        return redirect('dashboard')
+    students = []
+    if request.method == 'GET' and 'search' in request.GET:
+        search_query = request.GET.get('search', '').strip().lower()
+        search_type = request.GET.get('search_type', 'student_id')
+        if search_query:
+            queryset = StudentAdmission.objects.filter(
+                academic_session=active_session,
+                student__school=request.user.school
+            )
+            if search_type == 'student_id':
+                query = Q(student__student_id__iexact=search_query)
+            elif search_type == 'contact':
+                query = Q(student__contact__iexact=search_query)
+            elif search_type == 'father_name':
+                query = Q(student__father_guardian_name__iexact=search_query)
+            else:
+                query = Q(student__student_id__iexact=search_query) | Q(student__father_guardian_name__iexact=search_query) | Q(student__contact__iexact=search_query)
+            students = queryset.filter(query).distinct()
+            if not students:
+                messages.warning(request, "No results found.")
+            elif len(students) == 1:
+                students = [students.first()]
+    return render(request, 'main_app/monthly_fee.html', {
+        'students': students,
+        'active_session': active_session,
+        'search_type': request.GET.get('search_type', 'student_id'),
+    })
+
 @school_staff_required
 def edit_fee_structure(request, fee_id):
-    fee_structure = get_object_or_404(FeeStructure, id=fee_id, academic_session__school=request.user.school)
+    fee_structure = get_object_or_404(
+        FeeStructure, 
+        id=fee_id, 
+        school=request.user.school          # ← Added security
+    )
+
     if request.method == 'POST':
         form = FeeStructureForm(request.POST, instance=fee_structure)
         if form.is_valid():
@@ -765,214 +282,86 @@ def edit_fee_structure(request, fee_id):
             return redirect('add_fee_structure')
     else:
         form = FeeStructureForm(instance=fee_structure)
+
     return render(request, 'main_app/edit_fee_structure.html', {
         'form': form,
         'fee_structure': fee_structure,
     })
 
-def index(request):
-    return render(request, 'main_app/index.html')
+    
 
-# add (or confirm) these imports at the top of views.py
-# from django.db import transaction, IntegrityError
-# import uuid, os
-# from django.conf import settings
-
-#------------------------Students-----------------------------
-
-@school_staff_required
-def student_admission(request):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found. Please create an active session first.")
-        return redirect('dashboard')
-
-    if request.method == 'POST':
-        form = StudentAdmissionForm(request.POST, request.FILES, request=request)
-
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    # Create Student
-                    student = Student.objects.create(
-                        school=request.user.school,
-                        first_name=form.cleaned_data['first_name'],
-                        last_name=form.cleaned_data['last_name'],
-                        father_guardian_name=form.cleaned_data['father_guardian_name'],
-                        contact=form.cleaned_data['contact'],
-                        date_of_birth=form.cleaned_data['date_of_birth'],
-                        gender=form.cleaned_data['gender'],
-                        image=form.cleaned_data.get('image')
-                    )
-
-                    # Create Admission
-                    admission = form.save(commit=False)
-                    admission.student = student
-                    admission.academic_session = active_session
-                    admission.operator = request.user
-                    admission.admission_date = datetime.date.today()      # ← Fixed
-                    admission.status = True
-                    
-                    # Ensure required fee fields have defaults
-                    admission.admission_fee = admission.admission_fee or Decimal('0.00')
-                    admission.total_dues = admission.total_dues or Decimal('0.00')
-                    admission.balance = admission.balance or Decimal('0.00')
-                    
-                    admission.save()
-
-                messages.success(request, f"Student {student.first_name} {student.last_name} admitted successfully!")
-                return redirect('admission_success', student_id=student.student_id)
-
-            except Exception as e:
-                logger.error(f"Admission error: {e}")
-                messages.error(request, f"Failed to save: {str(e)}")
-        else:
-            messages.error(request, "Please correct the errors below.")
-            # Show detailed errors
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"{field.replace('_', ' ').title()}: {error}")
-
-    else:
-        form = StudentAdmissionForm(request=request)
-
-    return render(request, 'main_app/admission_form.html', {
-        'form': form,
-        'operator_name': request.user.username,
-    })
-
-
-
-
-@school_staff_required
-def edit_student(request, student_id):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('dashboard')
-    student_admission = get_object_or_404(
-        StudentAdmission,
-        student__student_id=student_id,
-        academic_session=active_session,
-        student__school=request.user.school
-    )
-    if request.method == 'POST':
-        form = EditStudentForm(request.POST, request.FILES, instance=student_admission, user=request.user)
-        if form.is_valid():
-            form.save()
-            messages.success(request, f"Student {student_admission.student.first_name} {student_admission.student.last_name} updated successfully.")
-            return redirect('dashboard')
-        else:
-            messages.error(request, "Please correct the errors below.")
-    else:
-        form = EditStudentForm(instance=student_admission, user=request.user)
-    return render(request, 'main_app/edit_student.html', {
-        'form': form,
-        'student': student_admission,
-    })
-
-@school_staff_required
-def admission_success(request, student_id):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('dashboard')
-    student = get_object_or_404(Student, student_id=student_id, school=request.user.school)
-    admission = get_object_or_404(StudentAdmission, student=student, academic_session=active_session)
-    return render(request, 'main_app/admission_success.html', {'student': student, 'admission': admission})
-
-@school_staff_required
-def generate_pdf(request, student_id):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('dashboard')
-    admission = get_object_or_404(
-        StudentAdmission,
-        student__student_id=student_id,
-        academic_session=active_session,
-        student__school=request.user.school
-    )
-    student = admission.student
-    school = student.school
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=1.5 * inch)
-    elements = []
-    styles = getSampleStyleSheet()
-    title_style = styles['Heading1']
-    normal_style = styles['Normal']
-    small_style = styles['Italic']
-    school_name = school.school_name if school else "Sun Rise School"
     current_date = datetime.datetime.now().strftime("%B %d, %Y %I:%M %p PKT")
+
+    # ====================== SCHOOL LOGO (Only once) ======================
     if school and school.school_logo and os.path.exists(school.school_logo.path):
         try:
-            logo = Image(school.school_logo.path, width=1 * inch, height=1 * inch)
+            logo = Image(school.school_logo.path, width=1.0*inch, height=1.0*inch)
             logo.hAlign = 'RIGHT'
-            logo.drawHeight = 1 * inch
-            logo.drawWidth = 1 * inch
             elements.append(logo)
         except Exception as e:
-            elements.append(Paragraph(f"Error loading school logo: {str(e)}", normal_style))
+            logger.warning(f"School logo failed: {e}")
     else:
-        elements.append(Paragraph("No school logo available", normal_style))
-    elements.append(Spacer(1, 0.1 * inch))
-    header_elements = [
-        Paragraph(f"<b>{school_name}</b>", title_style),
-        Paragraph(f"Date: {current_date}", small_style),
-    ]
-    for elem in header_elements:
-        elem.hAlign = 'CENTER'
-        elements.append(elem)
-        elements.append(Spacer(1, 0.1 * inch))
+        elements.append(Paragraph("School Logo", normal_style))
+
+    elements.append(Spacer(1, 0.1*inch))
+    elements.append(Paragraph(f"<b>{school.school_name if school else 'School'}</b>", title_style))
+    elements.append(Paragraph(f"Date: {current_date}", small_style))
+    elements.append(Spacer(1, 0.4*inch))
+
+    # ====================== STUDENT PHOTO ======================
     if student.image and os.path.exists(student.image.path):
         try:
-            img = Image(student.image.path, width=1.5 * inch, height=1.5 * inch)
-            img.hAlign = 'LEFT'
-            elements.append(img)
-            elements.append(Spacer(1, 0.2 * inch))
+            student_img = Image(student.image.path, width=1.7*inch, height=2.0*inch)
+            student_img.hAlign = 'LEFT'
+            elements.append(student_img)
         except Exception as e:
-            elements.append(Paragraph(f"Error loading student image: {str(e)}", normal_style))
-            elements.append(Spacer(1, 0.2 * inch))
+            logger.warning(f"Student image failed: {e}")
+            elements.append(Paragraph("Student Photo: Not Available", normal_style))
     else:
-        elements.append(Paragraph("No student image available", normal_style))
-        elements.append(Spacer(1, 0.2 * inch))
+        elements.append(Paragraph("Student Photo: Not Available", normal_style))
+
+    elements.append(Spacer(1, 0.3*inch))
+
+    # ====================== STUDENT DETAILS ======================
     details = [
         f"<b>Student ID:</b> {student.student_id}",
-        f"<b>Student Name:</b> {student.first_name} {student.last_name}",
-        f"<b>Father/Guardian Name:</b> {student.father_guardian_name}",
-        f"<b>Class:</b> {admission.class_name}",
-        f"<b>Section:</b> {admission.section or 'N/A'}",
-        f"<b>Roll Number:</b> {admission.roll_number}",
-        "<b>Fee Details:</b>",
-        f"  Admission Fee: Rs{admission.admission_fee or '0.00'}",
-        f"  Tuition Fee: Rs{admission.tuition_fee or '0.00'}",
-        f"  Exam Fee: Rs{admission.exam_fee or '0.00'}",
-        f"  Book Fee: Rs{admission.book_fee or '0.00'}",
-        f"  Uniform Fee: Rs{admission.uniform_fee or '0.00'}",
-        f"  Other Fee: Rs{admission.other_fee or '0.00'}",
-        f"  Promotion Fee: Rs{admission.promotion_fee or '0.00'}",
-        f"  Transport Fee: Rs{admission.transport_fee or '0.00'}",
-        f"  Discount: Rs{admission.discount or '0.00'}",
-        "<b>Calculations:</b>",
-        f"  Total Dues: Rs{admission.total_dues or '0.00'}",
-        f"  Received: Rs{admission.received or '0.00'}",
-        f"  Balance: Rs{admission.balance or '0.00'}",
+        f"<b>Name:</b> {student.first_name} {student.last_name}",
+        f"<b>Father/Guardian:</b> {student.father_guardian_name}",
+        f"<b>Class:</b> {admission.class_name} - {admission.section or 'N/A'}",
+        f"<b>Roll No:</b> {admission.roll_number}",
+        f"<b>Admission Date:</b> {admission.admission_date.strftime('%d %b %Y') if admission.admission_date else 'N/A'}",
     ]
-    for detail in details:
-        elements.append(Paragraph(detail, normal_style))
-        elements.append(Spacer(1, 0.1 * inch))
-    elements.append(Spacer(1, 0.2 * inch))
+
+    for line in details:
+        elements.append(Paragraph(line, normal_style))
+        elements.append(Spacer(1, 0.12*inch))
+
+    # Fee Summary
+    elements.append(Spacer(1, 0.25*inch))
+    elements.append(Paragraph("<b>Fee Summary</b>", styles['Heading3']))
+
+    fee_lines = [
+        f"Total Dues: <b>Rs {admission.total_dues or 0:.2f}</b>",
+        f"Received: Rs {admission.received or 0:.2f}",
+        f"Balance: <b>Rs {admission.balance or 0:.2f}</b>",
+    ]
+
+    for line in fee_lines:
+        elements.append(Paragraph(line, normal_style))
+        elements.append(Spacer(1, 0.1*inch))
+
+    elements.append(Spacer(1, 0.6*inch))
     elements.append(Paragraph("Powered By AliyarWeb Solutions", small_style))
+
+    # Build PDF
     doc.build(elements)
-    buffer.seek(0)
     pdf = buffer.getvalue()
     buffer.close()
-    student_name = f"{student.first_name}_{student.last_name}".replace(" ", "_")
-    roll_number = str(admission.roll_number)
-    safe_file_name = f"{student_name}_{roll_number}.pdf"
-    response = HttpResponse(content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{safe_file_name}"'
-    response.write(pdf)
+
+    filename = f"{student.first_name}_{student.last_name}_{admission.roll_number}.pdf".replace(" ", "_")
+
+    response = HttpResponse(pdf, content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 @school_staff_required
@@ -1010,36 +399,6 @@ def get_transport_details(request):
     else:
         data = {'transport_fee': 0, 'note': 'No transport selected'}
     return JsonResponse(data)
-
-@school_staff_required
-def list_admissions(request):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('dashboard')
-
-    admissions = StudentAdmission.objects.filter(
-        academic_session=active_session,
-        student__school=request.user.school
-    ).select_related('student').order_by('roll_number')
-
-    # Pagination
-    paginator = Paginator(admissions, 50)
-    page_number = request.GET.get('page')
-    try:
-        admissions_page = paginator.get_page(page_number)
-    except (PageNotAnInteger, EmptyPage):
-        admissions_page = paginator.get_page(1)
-
-    context = {
-        'admissions': admissions_page,
-        'page_obj': admissions_page,
-        'paginator': paginator,
-        'active_session': active_session,
-    }
-
-    return render(request, 'main_app/list_admissions.html', context)
-
 
 #------------------------Monthly Fee------------------------
 @school_staff_required
@@ -1085,7 +444,6 @@ def monthly_fee_detail(request, student_id):
             'student': None, 'month_data': [], 'active_session': None
         })
 
-    # Get student admission
     student_admission = get_object_or_404(
         StudentAdmission.objects.select_related('student'),
         student__student_id=student_id,
@@ -1093,11 +451,11 @@ def monthly_fee_detail(request, student_id):
         student__school=request.user.school
     )
 
-    # Prefetch existing monthly fees
+    # Prefetch existing fees
     monthly_fees = MonthlyFee.objects.filter(student_admission=student_admission).order_by('year', 'month')
     monthly_fee_dict = {fee.month: fee for fee in monthly_fees}
 
-    # Generate all months for the session
+    # Generate all months
     start_month_date = active_session.start_date + relativedelta(months=1)
     end_month_date = active_session.end_date
     all_months = []
@@ -1138,7 +496,7 @@ def monthly_fee_detail(request, student_id):
             total_dues = previous_balance + monthly_fee_value + transport_fee_value
 
             initial_data = {
-                'student_admission': student_admission,   # ← Full object (Important)
+                'student_admission': student_admission,
                 'month': month,
                 'year': year,
                 'previous_balance': previous_balance,
@@ -1159,8 +517,10 @@ def monthly_fee_detail(request, student_id):
                 'disabled': False,
             })
             last_current_balance = total_dues
+            student_admission.closing_balance = total_dues
+            student_admission.save(update_fields=['closing_balance'])
 
-    # POST Handling
+    # ==================== POST Handling ====================
     if request.method == 'POST':
         post_month = request.POST.get('month')
         post_year = int(request.POST.get('year', current_year))
@@ -1181,10 +541,20 @@ def monthly_fee_detail(request, student_id):
                 monthly_fee = form.save(commit=False)
                 monthly_fee.student_admission = student_admission
                 monthly_fee.operator = request.user
+                
+                # === CRITICAL FIX ===
+                if monthly_fee.received >= monthly_fee.total_dues:
+                    monthly_fee.has_payment = True
+                    monthly_fee.current_balance = Decimal('0.00')
+                else:
+                    monthly_fee.has_payment = False
+                    monthly_fee.current_balance = monthly_fee.total_dues - monthly_fee.received
+                
                 monthly_fee.save()
 
                 messages.success(request, f"Payment for {monthly_fee.month} {monthly_fee.year} saved successfully.")
                 return redirect('monthly_fee_success', monthly_fee_id=monthly_fee.id)
+
             except Exception as e:
                 logger.error("Error saving payment: %s", str(e))
                 messages.error(request, f"Error saving payment: {str(e)}")
@@ -1455,12 +825,18 @@ def promote_offline_success(request, student_id):
     messages.success(request, f"Student {admission.student.first_name} {admission.student.last_name} has been successfully promoted to {admission.class_name}, section {admission.section}.")
     return render(request, 'main_app/promote_offline_success.html', {'student': admission})
 
+
+
+# Helper to fetch previous balance (using your existing utility function)
+# from .utils import get_previous_balance, calculate_total_dues, next_available_roll, validate_transport
+
 @school_staff_required
 def promoted_students_report(request):
     active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
+    
     promoted_students = StudentAdmission.objects.filter(
         academic_session=active_session,
         student__school=request.user.school,
@@ -1472,7 +848,6 @@ def promoted_students_report(request):
     })
 
 
-#-------------------------Promote Existing Students-----------------
 @school_staff_required
 def promote_existing_students(request):
     active_session = get_active_session(request)
@@ -1491,38 +866,18 @@ def promote_existing_students(request):
             'no_previous': True
         })
 
-    # === Bulk Action Handling ===
-    if request.method == 'POST' and 'action' in request.POST:
-        student_ids = request.POST.getlist('student_ids')
-        action = request.POST.get('action')  # 'promote' or 'not_promote'
-
-        if student_ids:
-            students_to_update = StudentAdmission.objects.filter(
-                student__student_id__in=student_ids,
-                academic_session=previous_session,
-                student__school=request.user.school
-            )
-
-            if action == 'promote':
-                students_to_update.update(promoted=True, failed_to_promote=False)
-                messages.success(request, f"Successfully promoted {students_to_update.count()} students.")
-            elif action == 'not_promote':
-                students_to_update.update(promoted=True, failed_to_promote=True)
-                messages.success(request, f"Marked {students_to_update.count()} students as Not Promoted.")
-
-            # Refresh the page with same filter
-            return redirect(f"{reverse('promote_existing_students')}?class_name={request.POST.get('class_name', '')}&section={request.POST.get('section', '')}")
-
-    # === Normal Filter Logic ===
+    # Filter Logic
     class_choices = StudentAdmission.objects.filter(
         academic_session=previous_session,
-        student__school=request.user.school
+        student__school=request.user.school,
+        promoted=False  # Only show students not yet promoted
     ).values('class_name').distinct().order_by('class_name')
     class_choices = [c['class_name'] for c in class_choices]
 
     section_choices = StudentAdmission.objects.filter(
         academic_session=previous_session,
-        student__school=request.user.school
+        student__school=request.user.school,
+        promoted=False
     ).values('section').distinct().order_by('section')
     section_choices = [(s['section'], s['section']) for s in section_choices]
 
@@ -1535,8 +890,18 @@ def promote_existing_students(request):
             academic_session=previous_session,
             student__school=request.user.school,
             class_name=selected_class_name,
-            section=selected_section
+            section=selected_section,
+            promoted=False
         ).select_related('student').order_by('roll_number')
+
+        # Annotate pending balance for display
+        for student in students:
+            student.pending_balance = get_pending_balance(student)
+
+    admitted_student_ids = list(StudentAdmission.objects.filter(
+        academic_session=active_session,
+        student__school=request.user.school
+    ).values_list('student__student_id', flat=True))
 
     return render(request, 'main_app/promote_existing_students.html', {
         'class_choices': class_choices,
@@ -1544,36 +909,224 @@ def promote_existing_students(request):
         'selected_class_name': selected_class_name,
         'selected_section': selected_section,
         'students': students,
-        'no_previous': False
+        'no_previous': False,
+        'active_session': active_session,
+        'admitted_student_ids': admitted_student_ids,
     })
+
+
+@school_staff_required
+def bulk_promote_students_view(request):
+    """Processes mass student choices using system rules from table form states."""
+    active_session = get_active_session(request)
+    if not active_session:
+        messages.error(request, "No active session found.")
+        return redirect('promote_existing_students')
+
+    # Reads checkboxes from your grid layout: <input type="checkbox" name="admission_ids" value="ID">
+    admission_ids = request.POST.getlist('admission_ids')
+    target_section = request.POST.get('target_section', '').strip()
+
+    if not admission_ids:
+        messages.error(request, "No students selected for promotion.")
+        return redirect('promote_existing_students')
+
+    if not target_section:
+        messages.error(request, "Target section is required for bulk promotion.")
+        return redirect('promote_existing_students')
+
+    success_count = 0
+    
+    # Run the mass block safely inside an atomic transaction scope
+    try:
+        with transaction.atomic():
+            old_admissions = StudentAdmission.objects.select_for_update().filter(
+                id__in=admission_ids,
+                student__school=request.user.school
+            )
+
+            for old_admission in old_admissions:
+                # Direct dynamic row matching checks
+                roll_key = f'roll_number_{old_admission.id}'
+                pass_key = f'is_passed_{old_admission.id}'
+                
+                roll_value = request.POST.get(roll_key)
+                is_passed = request.POST.get(pass_key, 'true').lower() in ('1', 'true', 'yes', 'on')
+
+                try:
+                    target_roll = int(roll_value) if roll_value else old_admission.roll_number
+                except (TypeError, ValueError):
+                    raise ValueError(f"Invalid roll assignment input for {old_admission.student}")
+
+                # Calculate class progress tier
+                current_class = old_admission.class_name
+                target_class = CLASS_PROGRESSION.get(current_class, current_class) if is_passed else current_class
+
+                # Guard check for fee rules configurations
+                try:
+                    fee_struct = FeeStructure.objects.get(
+                        academic_session=active_session,
+                        class_name=target_class
+                    )
+                except FeeStructure.DoesNotExist:
+                    raise ValueError(f"No configured fee structure found for {target_class} in current active session.")
+
+                # Fee calculation logic matching single form structures
+                promo_charge = fee_struct.promotion_fee if is_passed else Decimal('0.00')
+                admission_session_dues = (
+                    fee_struct.paper_money +
+                    fee_struct.books_dues +
+                    fee_struct.uniform_dues +
+                    promo_charge +
+                    (fee_struct.other_charges or Decimal('0.00'))
+                )
+                
+                # Fetch balance from previous session
+                prev_session_balance = get_previous_balance(old_admission, active_session)
+                
+                # Setup unified final balance targets
+                total_session_dues = prev_session_balance + admission_session_dues + fee_struct.tuition_fee + (old_admission.transport_fee or Decimal('0.00'))
+
+                # Build the new session record entry link
+                new_admission = StudentAdmission.objects.create(
+                    student=old_admission.student,
+                    academic_session=active_session,
+                    class_name=target_class,
+                    section=target_section,
+                    roll_number=target_roll,
+                    admission_date=datetime.date.today(),
+                    promoted=True,
+                    failed_to_promote=not is_passed,
+                    status=True,
+                    operator=request.user,
+                    
+                    # Store applied structures layout values
+                    admission_fee=Decimal('0.00'), # Standard for promotions
+                    tuition_fee=fee_struct.tuition_fee,
+                    exam_fee=fee_struct.paper_money,
+                    book_fee=fee_struct.books_dues,
+                    uniform_fee=fee_struct.uniform_dues,
+                    promotion_fee=promo_charge,
+                    other_fee=fee_struct.other_charges,
+                    
+                    # Retain student route choices
+                    transport=old_admission.transport,
+                    transport_fee=old_admission.transport_fee,
+                    vehicle_no=old_admission.vehicle_no,
+                    route=old_admission.route,
+                    driver_contact=old_admission.driver_contact,
+                    
+                    previous_balance=prev_session_balance,
+                    discount=old_admission.discount or Decimal('0.00'),
+                    discount_behalf=old_admission.discount_behalf,
+                    received=Decimal('0.00'),
+                    total_dues=total_session_dues,
+                    balance=total_session_dues
+                )
+
+                # Initialize billing logs for the month
+                MonthlyFee.objects.create(
+                    student_admission=new_admission,
+                    month=active_session.start_date.strftime('%B'),
+                    year=active_session.start_date.year,
+                    previous_balance=prev_session_balance,
+                    monthly_fee=new_admission.tuition_fee or Decimal('0.00'),
+                    transport_fee=new_admission.transport_fee or Decimal('0.00'),
+                    total_dues=(prev_session_balance + (new_admission.tuition_fee or Decimal('0.00')) + (new_admission.transport_fee or Decimal('0.00'))),
+                    received=Decimal('0.00'),
+                    current_balance=(prev_session_balance + (new_admission.tuition_fee or Decimal('0.00')) + (new_admission.transport_fee or Decimal('0.00'))),
+                    operator=request.user
+                )
+
+                # Flag the historical record state
+                if is_passed:
+                    old_admission.promoted = True
+                    old_admission.failed_to_promote = False
+                else:
+                    old_admission.promoted = False
+                    old_admission.failed_to_promote = True
+                old_admission.status = False
+                old_admission.save()
+
+                success_count += 1
+                
+        messages.success(request, f"Successfully processed promotions for {success_count} students.")
+    except Exception as e:
+        messages.error(request, f"Bulk promotion aborted entirely due to error: {str(e)}")
+
+    return redirect('promote_existing_students')
+
+
 @school_staff_required
 def promote_existing_student(request, student_id):
     active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
-    
+
+    # Get previous session
+    previous_session = AcademicSession.objects.filter(
+        school=request.user.school,
+        is_active=False,
+        end_date__lt=active_session.start_date
+    ).order_by('-end_date').first()
+
+    if not previous_session:
+        messages.error(request, "No previous session found to promote from.")
+        return redirect('promote_existing_students')
+
     student_admission = get_object_or_404(
         StudentAdmission,
         student__student_id=student_id,
+        academic_session=previous_session,
         student__school=request.user.school
     )
-    
+
+    # Prevent duplicate promotion
     if StudentAdmission.objects.filter(
         student=student_admission.student,
         academic_session=active_session
     ).exists():
         messages.error(request, f"Student {student_admission.student.first_name} is already admitted in the current session.")
         return redirect('promote_existing_students')
-    
+
     filtered_class = request.GET.get('class_name')
     filtered_section = request.GET.get('section')
-    current_class = student_admission.class_name
-    
-    # Get fee structures for all classes
-    fee_structures = FeeStructure.objects.filter(academic_session=active_session).values(
-        'class_name', 'tuition_fee', 'paper_money', 'books_dues', 'uniform_dues', 'other_charges', 'promotion_fee'
+
+    # Initialize Form
+    form = PromoteExistingStudentForm(
+        request.POST or None,
+        request.FILES or None,
+        student_admission=student_admission,
+        request=request,
+        filtered_class=filtered_class,
+        filtered_section=filtered_section
     )
+
+    if request.method == 'POST' and form.is_valid():
+        try:
+            with transaction.atomic():
+                new_admission = form.save(commit=True)   # ← Form now handles everything
+
+                messages.success(request, f"Student {student_admission.student.first_name} has been successfully promoted to the new session.")
+
+                # Redirect back with filters preserved
+                query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
+                return redirect(f"{reverse('promote_existing_students')}?{query_params}")
+
+        except Exception as e:
+            messages.error(request, f"Promotion failed: {str(e)}")
+            # Optionally log the error
+
+    # === Context for Template ===
+    # Fee structures for JS (if your template uses dynamic fee loading)
+    fee_structures = FeeStructure.objects.filter(
+        academic_session=active_session
+    ).values(
+        'class_name', 'tuition_fee', 'paper_money', 'books_dues',
+        'uniform_dues', 'other_charges', 'promotion_fee'
+    )
+
     fee_structure_dict = {
         fs['class_name']: {
             'tuition_fee': str(fs['tuition_fee']),
@@ -1581,52 +1134,18 @@ def promote_existing_student(request, student_id):
             'book_fee': str(fs['books_dues']),
             'uniform_fee': str(fs['uniform_dues']),
             'other_fee': str(fs['other_charges'] or Decimal('0.00')),
-            'promotion_fee': str(fs['promotion_fee'])
+            'promotion_fee': str(fs['promotion_fee'] or Decimal('0.00'))
         } for fs in fee_structures
     }
-    
-    # Check for fee structure for initial class
-    initial_class = filtered_class or CLASS_PROGRESSION.get(current_class, current_class) or current_class
-    fee_structure_exists = FeeStructure.objects.filter(
-        academic_session=active_session,
-        class_name=initial_class
-    ).exists()
-    if not fee_structure_exists:
-        messages.warning(request, f"No fee structure found for class {initial_class} in the current session. Fee fields will be set to 0.")
-    
-    form = PromoteExistingStudentForm(
-        request.POST or None,
-        request.FILES or None,
-        instance=student_admission,
-        student_admission=student_admission,
-        request=request,
-        filtered_class=filtered_class,
-        filtered_section=filtered_section
-    )
-    
-    if request.method == 'POST' and form.is_valid():
-        try:
-            new_admission = form.save(commit=False)
-            new_admission.academic_session = active_session
-            new_admission.student.school = request.user.school
-            new_admission.promoted = True
-            new_admission.failed_to_promote = False
-            new_admission.operator = request.user
-            new_admission.save()
-            messages.success(request, f"Student {student_admission.student.first_name} promoted successfully.")
-            query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
-            return redirect(f"{reverse('promote_existing_students')}?{query_params}")
-        except Exception as e:
-            messages.error(request, f"Error promoting student: {str(e)}")
-    
+
     return render(request, 'main_app/promote_existing_student_form.html', {
         'form': form,
         'student': student_admission,
-        'current_class': current_class,
+        'current_class': student_admission.class_name,
         'fee_structures': fee_structure_dict,
         'filtered_class': filtered_class,
         'filtered_section': filtered_section,
-        'active_session': active_session  # Pass active_session for template
+        'active_session': active_session,
     })
 
 @school_staff_required
@@ -1656,10 +1175,21 @@ def mark_not_promoted(request, student_id):
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
+    # operate on the previous session admission
+    previous_session = AcademicSession.objects.filter(
+        school=request.user.school,
+        is_active=False,
+        end_date__lt=active_session.start_date
+    ).order_by('-end_date').first()
+
+    if not previous_session:
+        messages.error(request, "No previous session found to mark not promoted.")
+        return redirect('promote_existing_students')
 
     student_admission = get_object_or_404(
         StudentAdmission,
         student__student_id=student_id,
+        academic_session=previous_session,
         student__school=request.user.school
     )
 
@@ -1762,14 +1292,14 @@ def teacher_list(request):
 
 @school_staff_required
 def teacher_create(request):
-    
+   
     if request.method == 'POST':
-        form = TeacherForm(request.POST, request=request)
+        form = TeacherForm(data=request.POST, request=request)   # Better way
         if form.is_valid():
             try:
                 form.save()
                 messages.success(request, "Teacher created successfully.")
-                logger.info("Teacher created: %s", form.cleaned_data['name'])
+                logger.info("Teacher created: %s", form.cleaned_data.get('name'))
                 return redirect('teacher_list')
             except Exception as e:
                 logger.error("Error creating teacher: %s", str(e))
@@ -1778,8 +1308,12 @@ def teacher_create(request):
             logger.warning("Teacher form invalid: %s", form.errors)
             messages.error(request, f"Form invalid: {form.errors.as_text()}")
     else:
-        form = TeacherForm(request=request)
-    return render(request, 'main_app/teacher_form.html', {'form': form, 'action': 'Create'})
+        form = TeacherForm(request=request)   # GET request
+
+    return render(request, 'main_app/teacher_form.html', {
+        'form': form, 
+        'action': 'Create'
+    })
 
 @school_staff_required
 def teacher_update(request, teacher_id):
@@ -1832,48 +1366,64 @@ def teacher_dashboard(request):
         is_active=True
     ).first()
 
-    # Optimized querysets
-    students = StudentAdmission.objects.filter(
+    if not active_session:
+        context = {
+            'teacher': teacher,
+            'active_session': None,
+        }
+        return render(request, 'main_app/teacher_dashboard.html', context)
+
+    # Get all students in teacher's class/section
+    students_qs = StudentAdmission.objects.filter(
         student__school=teacher.school,
         class_name=teacher.class_name,
         section=teacher.section,
         academic_session=active_session
     ).select_related('student')
 
-    results = StudentResult.objects.filter(
-        student_admission__in=students,
+    total_students = students_qs.count()
+
+    # Results - Only teacher's subjects
+    results_qs = StudentResult.objects.filter(
+        student_admission__in=students_qs,
         subject__in=teacher.subjects.all()
-    ).select_related('student_admission__student', 'subject').order_by(
-        'student_admission__student__first_name', 
-        'subject__name', 
-        'exam_type'
-    )
+    ).select_related('student_admission__student', 'subject')
 
     # Apply filters
     exam_type = request.GET.get('exam_type', '')
     subject_id = request.GET.get('subject', '')
 
     if exam_type:
-        results = results.filter(exam_type=exam_type)
+        results_qs = results_qs.filter(exam_type=exam_type)
     if subject_id:
-        results = results.filter(subject_id=subject_id)
+        results_qs = results_qs.filter(subject_id=subject_id)
 
-    # Events - Show relevant and upcoming events
+    results = results_qs.order_by(
+        'student_admission__student__first_name', 
+        'subject__name', 
+        'exam_type'
+    )
+
+    # Upcoming Events
     events = Events.objects.filter(
         school=teacher.school,
         event_for__in=['All', 'Teacher']
-    ).order_by('event_date')[:8]   # Limit to 8 most relevant
+    ).order_by('event_date')[:8]
 
     context = {
         'teacher': teacher,
         'active_session': active_session,
+        'total_students': total_students,
         'results': results,
         'subjects': teacher.subjects.all(),
-        'exam_types': StudentResult.EXAM_TYPE_CHOICES,
+        'exam_types': StudentResult.EXAM_TYPE_CHOICES,   # or get dynamic
         'exam_type': exam_type,
         'subject_id': subject_id,
         'events': events,
-        'total_students': students.count(),   # Added useful stat
+        
+        # Extra useful stats
+        'total_results': results.count(),
+        'recent_results': results[:10],   # Already slicing in template, but good to have
     }
     
     return render(request, 'main_app/teacher_dashboard.html', context)
@@ -1963,8 +1513,27 @@ def result_delete(request, result_id):
 #------------------------------Subjects---------------------------
 @school_staff_or_teacher_required
 def subject_list(request):
-    subjects = Subject.objects.filter(school=request.user.school)
-    return render(request, 'main_app/subject_list.html', {'subjects': subjects})
+    if getattr(request.user, 'user_type', None) == 4:  # Teacher
+        # Show only subjects assigned to this teacher
+        subjects = request.user.teacher.subjects.all().order_by('name')
+        
+        context = {
+            'subjects': subjects,
+            'is_teacher': True,
+            'page_title': 'My Subjects'
+        }
+    else:  # Admin / Staff
+        subjects = Subject.objects.filter(
+            school=request.user.school
+        ).order_by('name').prefetch_related('teacher_set')
+        
+        context = {
+            'subjects': subjects,
+            'is_teacher': False,
+            'page_title': 'All Subjects'
+        }
+    
+    return render(request, 'main_app/subject_list.html', context)
 
 @school_staff_or_teacher_required
 def subject_create(request):
@@ -2123,14 +1692,6 @@ def delete_syllabus(request, syllabus_id):
 
 
 
-
-def calculate_overall_grade(percentage):
-    if percentage >= 90: return 'A+'
-    elif percentage >= 80: return 'A'
-    elif percentage >= 70: return 'B'
-    elif percentage >= 60: return 'C'
-    elif percentage >= 50: return 'D'
-    else: return 'F'
 
 @student_required
 def generate_results_pdf(request):
@@ -2632,134 +2193,117 @@ def events_detail(request, pk):
 def analytics(request):
     chart_html = None
     form = AnalyticsForm(request.POST or None, request=request)
+    
     user_school = request.user.school
-
-    # 📌 Sessions for dropdown
-    all_sessions = AcademicSession.objects.filter(school=user_school).order_by('-start_date')
     selected_session_id = request.GET.get('session')
-
+    
     if selected_session_id:
-        active_session = AcademicSession.objects.filter(id=selected_session_id, school=user_school).first()
+        active_session = AcademicSession.objects.filter(
+            id=selected_session_id, school=user_school
+        ).first()
     else:
-        active_session = AcademicSession.objects.filter(is_active=True, school=user_school).first()
+        active_session = AcademicSession.objects.filter(
+            is_active=True, school=user_school
+        ).first()
 
-    # 1️⃣ Pie Chart - Student distribution
-    student_counts = StudentAdmission.objects.filter(student__school=user_school)
+    all_sessions = AcademicSession.objects.filter(school=user_school).order_by('-start_date')
+
+    # ====================== PRE-COMPUTED CHARTS (Fast) ======================
+    
+    # 1. Pie Chart - Student Distribution
+    student_qs = StudentAdmission.objects.filter(student__school=user_school)
     if active_session:
-        student_counts = student_counts.filter(academic_session=active_session)
+        student_qs = student_qs.filter(academic_session=active_session)
 
-    pie_df = (
-        student_counts
-        .values('class_name')
-        .annotate(count=Count('id'))
-        .order_by('class_name')
-    )
+    pie_df = pd.DataFrame(list(
+        student_qs.values('class_name').annotate(count=Count('id')).order_by('class_name')
+    ))
+
     pie_chart = px.pie(
-        pie_df,
-        names='class_name',
-        values='count',
-        title='🎓 Student Distribution by Class',
-        hole=0.4,
-        color_discrete_sequence=px.colors.sequential.RdBu
-    ).to_html()
+        pie_df, names='class_name', values='count',
+        title='🎓 Student Distribution by Class', hole=0.4
+    ).to_html() if not pie_df.empty else None
 
-    # 2️⃣ Bar Chart - Financial Overview
-    teacher_salary = Teacher.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or Decimal('0.00')
-    staff_salary = Staff.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or Decimal('0.00')
+    # 2. Financial Bar Chart
+    teacher_salary = Teacher.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or 0
+    staff_salary = Staff.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or 0
 
-    total_expenses_qs = Expenses.objects.filter(school=user_school)
+    expenses_qs = Expenses.objects.filter(school=user_school)
     if active_session:
-        total_expenses_qs = total_expenses_qs.filter(payment_date__range=(active_session.start_date, active_session.end_date))
-    total_expenses = total_expenses_qs.aggregate(total=Sum('price'))['total'] or Decimal('0.00')
+        expenses_qs = expenses_qs.filter(payment_date__range=(active_session.start_date, active_session.end_date))
+    total_expenses = expenses_qs.aggregate(total=Sum('price'))['total'] or 0
 
-    monthly_fee_qs = MonthlyFee.objects.filter(student_admission__student__school=user_school)
-    admission_fee_qs = StudentAdmission.objects.filter(student__school=user_school)
-
+    monthly_qs = MonthlyFee.objects.filter(student_admission__student__school=user_school)
     if active_session:
-        monthly_fee_qs = monthly_fee_qs.filter(student_admission__academic_session=active_session)
-        admission_fee_qs = admission_fee_qs.filter(academic_session=active_session)
+        monthly_qs = monthly_qs.filter(student_admission__academic_session=active_session)
 
-    monthly_fee_total = monthly_fee_qs.aggregate(total=Sum('received'))['total'] or Decimal('0.00')
-    admission_fee_total = admission_fee_qs.aggregate(total=Sum('received'))['total'] or Decimal('0.00')
-    total_fee = monthly_fee_total + admission_fee_total
-
-    total_balance = monthly_fee_qs.aggregate(total=Sum('current_balance'))['total'] or Decimal('0.00')
+    fee_stats = monthly_qs.aggregate(
+        received=Sum('received'),
+        balance=Sum('current_balance')
+    )
 
     bar_df = pd.DataFrame({
         "Category": ["Expenses", "Teacher Salaries", "Staff Salaries", "Fee Collected", "Balance"],
-        "Amount": [total_expenses, teacher_salary, staff_salary, total_fee, total_balance]
+        "Amount": [float(total_expenses), float(teacher_salary), float(staff_salary),
+                   float(fee_stats['received'] or 0), float(fee_stats['balance'] or 0)]
     })
-    bar_chart = px.bar(
-        bar_df,
-        x="Category",
-        y="Amount",
-        title="💰 Financial Overview",
-        color="Category",
-        text="Amount"
-    ).to_html()
 
-    # 3️⃣ Scatter Chart - Activity Trend
-    monthly_fees = MonthlyFee.objects.filter(student_admission__student__school=user_school)
-    admissions = StudentAdmission.objects.filter(student__school=user_school)
-    expenses = Expenses.objects.filter(school=user_school)
+    bar_chart = px.bar(bar_df, x="Category", y="Amount", title="💰 Financial Overview", 
+                       color="Category", text="Amount").to_html()
 
+    # 3. Trend Chart (Monthly Fee)
+    trend_chart = None
     if active_session:
-        monthly_fees = monthly_fees.filter(student_admission__academic_session=active_session)
-        admissions = admissions.filter(academic_session=active_session)
-        expenses = expenses.filter(payment_date__range=(active_session.start_date, active_session.end_date))
+        trend_qs = monthly_qs.values('payment_date').annotate(total=Sum('received')).order_by('payment_date')
+        trend_df = pd.DataFrame(list(trend_qs))
+        if not trend_df.empty:
+            trend_df['payment_date'] = pd.to_datetime(trend_df['payment_date'])
+            trend_chart = px.line(trend_df, x='payment_date', y='total', 
+                                title="📈 Monthly Fee Collection Trend", markers=True).to_html()
 
-    progress_data = []
-    for fee in monthly_fees.values('payment_date', 'received'):
-        progress_data.append({"date": fee['payment_date'], "type": "Fee Collected", "amount": float(fee['received'])})
-    for adm in admissions.values('admission_date'):
-        progress_data.append({"date": adm['admission_date'], "type": "Admission", "amount": 1})
-    for exp in expenses.values('payment_date', 'price'):
-        progress_data.append({"date": exp['payment_date'], "type": "Expense", "amount": float(exp['price']) * -1})
+    # ====================== INTERACTIVE CHART (Safely) ======================
+    if request.method == 'POST' and form.is_valid():
+        try:
+            model_name = form.cleaned_data['model_name']
+            x_axis = form.cleaned_data['x_axis']
+            y_axis = form.cleaned_data['y_axis']
+            chart_type = form.cleaned_data['chart_type']
 
-    progress_df = pd.DataFrame(progress_data)
-    if not progress_df.empty:
-        progress_df['date'] = pd.to_datetime(progress_df['date'])
+            model = apps.get_model('main_app', model_name)
+            queryset = model.objects.all()
 
-    trend_chart = px.scatter(
-        progress_df,
-        x="date",
-        y="amount",
-        color="type",
-        title="📈 School Activity Trend Over Time",
-        trendline="ols"
-    ).to_html()
+            # Safe filtering
+            if hasattr(model, 'school'):
+                queryset = queryset.filter(school=user_school)
+            elif hasattr(model, 'student_admission'):
+                queryset = queryset.filter(student_admission__student__school=user_school)
+            elif hasattr(model, 'student'):
+                queryset = queryset.filter(student__school=user_school)
 
-    # 4️⃣ Interactive Chart via Form
-    if form.is_valid():
-        model_name = form.cleaned_data['model_name']
-        x_axis = form.cleaned_data['x_axis']
-        y_axis = form.cleaned_data['y_axis']
-        chart_type = form.cleaned_data['chart_type']
+            if active_session and hasattr(model, 'academic_session'):
+                queryset = queryset.filter(academic_session=active_session)
 
-        model = apps.get_model('main_app', model_name)
-        queryset = model.objects.all()
+            # Get only requested fields safely
+            df = pd.DataFrame.from_records(
+                queryset.values(x_axis, y_axis)
+            ).dropna()
 
-        if 'school' in [f.name for f in model._meta.fields]:
-            queryset = queryset.filter(school=user_school)
-        if 'academic_session' in [f.name for f in model._meta.fields] and active_session:
-            queryset = queryset.filter(academic_session=active_session)
-
-        df = pd.DataFrame.from_records(queryset.values(x_axis, y_axis)).dropna()
-        if df.empty:
-            chart_html = "<p style='color:red;'>No data available for the selected model and fields.</p>"
-        elif df[x_axis].nunique() <= 1:
-            chart_html = "<p style='color:red;'>Not enough variation in the X-axis to plot this chart.</p>"
-        else:
-            if chart_type == 'bar':
-                fig = px.bar(df, x=x_axis, y=y_axis)
-            elif chart_type == 'line':
-                fig = px.line(df, x=x_axis, y=y_axis)
-            elif chart_type == 'scatter':
-                try:
-                    fig = px.scatter(df, x=x_axis, y=y_axis, trendline="ols")
-                except Exception:
+            if df.empty:
+                chart_html = "<p class='alert alert-warning'>No data available for the selected fields.</p>"
+            elif df[x_axis].nunique() <= 1:
+                chart_html = "<p class='alert alert-warning'>Not enough variation in X-axis to generate chart.</p>"
+            else:
+                if chart_type == 'bar':
+                    fig = px.bar(df, x=x_axis, y=y_axis)
+                elif chart_type == 'line':
+                    fig = px.line(df, x=x_axis, y=y_axis)
+                else:
                     fig = px.scatter(df, x=x_axis, y=y_axis)
-            chart_html = fig.to_html()
+
+                chart_html = fig.to_html()
+
+        except Exception as e:
+            chart_html = f"<p class='alert alert-danger'>Error generating chart: {str(e)}</p>"
 
     return render(request, 'main_app/analytics.html', {
         'form': form,

@@ -200,7 +200,8 @@
                             <th>Student</th>
                             <th>Class - Section</th>
                             <th>Father/Guardian</th>
-                            <th class="text-end">Actions</th>
+                            <th>Edit</th>
+                            <th class="text-end">Fee</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -212,12 +213,14 @@
                             </td>
                             <td>{{ admission.class_name }} - {{ admission.section|default:"—" }}</td>
                             <td>{{ admission.student.father_guardian_name|default:"—" }}</td>
-                            <td class="text-end">
+                            <td>
                                 <a href="{% url 'edit_student' admission.student.student_id %}" class="btn btn-sm btn-warning">
                                     <i class="fas fa-edit"></i>
                                 </a>
-                                <a href="{% url 'monthly_fee_detail' admission.student.student_id %}" class="btn btn-sm btn-primary">
-                                    <i class="fas fa-money-bill"></i>
+                            </td>
+                            <td class="text-end">    
+                                <a href="{% url 'monthly_fee_detail' admission.student.student_id %}" class="btn btn-sm btn-success">
+                                    <i class="fas fa-hand-holding-usd"></i>
                                 </a>
                             </td>
                         </tr>
