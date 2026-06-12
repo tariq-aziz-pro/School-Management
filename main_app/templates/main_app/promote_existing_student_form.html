@@ -27,12 +27,12 @@
             </div>
 
             <div class="col-md-6">
-                <h4 class="mb-3">Academic &amp; Transport Details</h4>
+                <h4 class="mb-3">Academic Details</h4>
                 {{ form.class_name|as_crispy_field }}
                 {{ form.section|as_crispy_field }}
                 {{ form.roll_number|as_crispy_field }}
 
-                <h5 class="mt-4">Transport</h5>
+                <h5 class="mt-4 mb-3">Transport Details</h5>
                 {{ form.transport|as_crispy_field }}
                 <div id="transport-fields">
                     {{ form.vehicle_no|as_crispy_field }}
@@ -41,9 +41,8 @@
                     {{ form.transport_fee|as_crispy_field }}
                 </div>
 
-                <h4 class="mt-4 mb-3">Fee Configuration</h4>
+                <h4 class="mt-4 mb-3">Fee Details</h4>
                 {{ form.previous_balance|as_crispy_field }}
-                {{ form.previous_balance_action|as_crispy_field }}
 
                 {{ form.tuition_fee|as_crispy_field }}
                 {{ form.exam_fee|as_crispy_field }}
@@ -55,7 +54,7 @@
                 {{ form.discount_behalf|as_crispy_field }}
                 {{ form.received|as_crispy_field }}
 
-                <div class="mt-3">
+                <div class="mt-3 border-top pt-3">
                     {{ form.total_dues|as_crispy_field }}
                     {{ form.balance|as_crispy_field }}
                 </div>
@@ -79,7 +78,6 @@
 
         function calculateTotals() {
             var previous_balance = parseFloat($('#id_previous_balance').val()) || 0;
-            var action = $('#id_previous_balance_action').val() || 'carry';
             var tuition = parseFloat($('#id_tuition_fee').val()) || 0;
             var exam = parseFloat($('#id_exam_fee').val()) || 0;
             var book = parseFloat($('#id_book_fee').val()) || 0;
@@ -90,11 +88,8 @@
             var discount = parseFloat($('#id_discount').val()) || 0;
             var received = parseFloat($('#id_received').val()) || 0;
 
-            var prev = (action === 'carry') ? previous_balance : 0;
-            var rec = (action === 'apply') ? received + previous_balance : received;
-
-            var total = prev + tuition + exam + book + uniform + promotion + other + transport - discount;
-            var balance = total - rec;
+            var total = previous_balance + tuition + exam + book + uniform + promotion + other + transport - discount;
+            var balance = total - received;
 
             $('#id_total_dues').val(total.toFixed(2));
             $('#id_balance').val(balance.toFixed(2));
@@ -108,6 +103,7 @@
             calculateTotals();
         }
 
+        // Dynamic fee loading when class changes
         $('#id_class_name').on('change', function () {
             var cls = $(this).val();
             if (feeStructures[cls]) {
@@ -116,15 +112,18 @@
                 $('#id_book_fee').val(feeStructures[cls].book_fee);
                 $('#id_uniform_fee').val(feeStructures[cls].uniform_fee);
                 $('#id_promotion_fee').val(feeStructures[cls].promotion_fee);
-                $('#id_other_fee').val(feeStructures[cls].other_fee);
+                $('#id_other_fee').val(feeStructures[cls].other_fee || '0.00');
             }
             calculateTotals();
         });
 
         // Event listeners
-        $('#id_previous_balance_action, #id_previous_balance, #id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_promotion_fee, #id_other_fee, #id_transport_fee, #id_discount, #id_received, #id_transport')
+        $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_promotion_fee, #id_other_fee, #id_transport_fee, #id_discount, #id_received')
             .on('input change', calculateTotals);
 
+        $('#id_transport').on('change', updateTransportFields);
+
+        // Initialize
         updateTransportFields();
         calculateTotals();
     });

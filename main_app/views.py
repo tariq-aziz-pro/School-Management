@@ -917,7 +917,7 @@ def promote_existing_students(request):
 
 @school_staff_required
 def bulk_promote_students_view(request):
-    """Processes mass student choices using system rules from table form states."""
+    #Processes mass student choices using system rules from table form states."""
     active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
@@ -1064,7 +1064,6 @@ def promote_existing_student(request, student_id):
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
 
-    # Get previous session
     previous_session = AcademicSession.objects.filter(
         school=request.user.school,
         is_active=False,
@@ -1082,7 +1081,6 @@ def promote_existing_student(request, student_id):
         student__school=request.user.school
     )
 
-    # Prevent duplicate promotion
     if StudentAdmission.objects.filter(
         student=student_admission.student,
         academic_session=active_session
@@ -1093,7 +1091,6 @@ def promote_existing_student(request, student_id):
     filtered_class = request.GET.get('class_name')
     filtered_section = request.GET.get('section')
 
-    # Initialize Form
     form = PromoteExistingStudentForm(
         request.POST or None,
         request.FILES or None,
@@ -1106,20 +1103,20 @@ def promote_existing_student(request, student_id):
     if request.method == 'POST' and form.is_valid():
         try:
             with transaction.atomic():
-                new_admission = form.save(commit=True)   # ← Form now handles everything
+                new_admission = form.save(commit=True)
 
-                messages.success(request, f"Student {student_admission.student.first_name} has been successfully promoted to the new session.")
+                messages.success(request, f"{student_admission.student.first_name} has been successfully promoted!")
 
-                # Redirect back with filters preserved
-                query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
+                query_params = urlencode({
+                    'class_name': filtered_class,
+                    'section': filtered_section
+                })
                 return redirect(f"{reverse('promote_existing_students')}?{query_params}")
 
         except Exception as e:
             messages.error(request, f"Promotion failed: {str(e)}")
-            # Optionally log the error
 
-    # === Context for Template ===
-    # Fee structures for JS (if your template uses dynamic fee loading)
+    # Fee structures for JS dynamic loading
     fee_structures = FeeStructure.objects.filter(
         academic_session=active_session
     ).values(
@@ -1133,8 +1130,8 @@ def promote_existing_student(request, student_id):
             'exam_fee': str(fs['paper_money']),
             'book_fee': str(fs['books_dues']),
             'uniform_fee': str(fs['uniform_dues']),
-            'other_fee': str(fs['other_charges'] or Decimal('0.00')),
-            'promotion_fee': str(fs['promotion_fee'] or Decimal('0.00'))
+            'other_fee': str(fs.get('other_charges') or '0.00'),
+            'promotion_fee': str(fs.get('promotion_fee') or '0.00')
         } for fs in fee_structures
     }
 

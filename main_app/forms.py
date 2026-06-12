@@ -811,42 +811,31 @@ class PromoteOfflineStudentForm(forms.ModelForm):
 # from .models import StudentAdmission, AcademicSession, MonthlyFee, FeeStructure, CLASS_PROGRESSION
 
 class PromoteExistingStudentForm(forms.ModelForm):
-    # Student Profile Fields (Editable)
-    first_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control'}))
-    last_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control'}))
-    father_guardian_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control'}))
+    # Student Profile - Mostly Readonly
+    first_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}))
+    last_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}))
+    father_guardian_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'readonly': 'readonly'}))
     contact = forms.CharField(max_length=20, widget=forms.TextInput(attrs={'class': 'form-control'}))
-    date_of_birth = forms.DateField(widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}))
-    gender = forms.ChoiceField(choices=[('Male', 'Male'), ('Female', 'Female')], widget=forms.Select(attrs={'class': 'form-control'}))
+    date_of_birth = forms.DateField(widget=forms.DateInput(attrs={'type': 'date', 'class': 'form-control', 'readonly': 'readonly'}))
+    gender = forms.ChoiceField(choices=[('Male', 'Male'), ('Female', 'Female')], widget=forms.Select(attrs={'class': 'form-control', 'disabled': 'disabled'}))
     image = forms.ImageField(required=False, label="Update Image", widget=forms.FileInput(attrs={'class': 'form-control'}))
 
-    # Previous Balance Handling
+    # Previous Balance - Always Carry (Readonly)
     previous_balance = forms.DecimalField(
         max_digits=10, decimal_places=2,
+        required=False,
         widget=forms.NumberInput(attrs={'readonly': 'readonly', 'class': 'form-control bg-light'})
     )
 
-    PREVIOUS_BALANCE_ACTIONS = [
-        ('carry', 'Carry Forward to New Session (Recommended)'),
-        ('apply', 'Apply as Payment in New Session'),
-        ('waive', 'Waive Previous Balance'),
-    ]
-
-    previous_balance_action = forms.ChoiceField(
-        choices=PREVIOUS_BALANCE_ACTIONS,
-        initial='carry',
-        widget=forms.Select(attrs={'class': 'form-control'})
-    )
-
     # Fee Fields
-    tuition_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    exam_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    book_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    uniform_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    promotion_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    other_fee = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
-    transport_fee = forms.DecimalField(max_digits=8, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control transport-field', 'step': '0.01'}))
-    discount = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
+    tuition_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    exam_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    book_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    uniform_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    promotion_fee = forms.DecimalField(max_digits=10, decimal_places=2, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    other_fee = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    transport_fee = forms.DecimalField(max_digits=8, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control transport-field'}))
+    discount = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control'}))
     discount_behalf = forms.ChoiceField(
         choices=[('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES,
         required=False,
@@ -854,23 +843,12 @@ class PromoteExistingStudentForm(forms.ModelForm):
     )
     received = forms.DecimalField(
         max_digits=10, decimal_places=2, required=False, initial=Decimal('0.00'),
-        widget=forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'})
+        widget=forms.NumberInput(attrs={'class': 'form-control'})
     )
 
     class Meta:
         model = StudentAdmission
-        fields = ['class_name', 'section', 'roll_number', 'transport', 'vehicle_no', 'route', 'driver_contact','total_dues', 'balance']
-        widgets = {
-            'class_name': forms.Select(attrs={'class': 'form-control'}),
-            'section': forms.Select(attrs={'class': 'form-control'}),
-            'roll_number': forms.NumberInput(attrs={'class': 'form-control'}),
-            'transport': forms.Select(attrs={'class': 'form-control transport-field'}),
-            'vehicle_no': forms.TextInput(attrs={'class': 'form-control transport-field'}),
-            'route': forms.TextInput(attrs={'class': 'form-control transport-field'}),
-            'driver_contact': forms.TextInput(attrs={'class': 'form-control transport-field'}),
-            'total_dues': forms.NumberInput(attrs={'readonly': 'readonly', 'class': 'form-control'}),
-            'balance': forms.NumberInput(attrs={'readonly': 'readonly', 'class': 'form-control'}),
-        }
+        fields = ['class_name', 'section', 'roll_number', 'transport', 'vehicle_no', 'route', 'driver_contact', 'total_dues', 'balance']
 
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop('request', None)
@@ -891,7 +869,7 @@ class PromoteExistingStudentForm(forms.ModelForm):
         old = self.student_admission
         student = old.student
 
-        # Student Info
+        # Personal Info (mostly readonly)
         self.fields['first_name'].initial = student.first_name
         self.fields['last_name'].initial = student.last_name
         self.fields['father_guardian_name'].initial = student.father_guardian_name
@@ -900,7 +878,7 @@ class PromoteExistingStudentForm(forms.ModelForm):
         self.fields['gender'].initial = student.gender
         self.fields['image'].initial = student.image
 
-        # Class, Section & Roll
+        # Academic
         next_class = CLASS_PROGRESSION.get(old.class_name, old.class_name)
         target_class = self.filtered_class if self.filtered_class else next_class
 
@@ -921,11 +899,10 @@ class PromoteExistingStudentForm(forms.ModelForm):
         self.fields['discount_behalf'].initial = old.discount_behalf
         self.fields['received'].initial = Decimal('0.00')
 
-        # Previous Balance
-        pending = get_pending_balance(old)
-        self.fields['previous_balance'].initial = pending
+        # Previous Balance - Always Carry
+        self.fields['previous_balance'].initial = get_pending_balance(old)
 
-        # Fee Structure Lookup (Safe)
+        # Load Fee Structure for new class
         try:
             fee = FeeStructure.objects.filter(
                 school=self.request.user.school,
@@ -940,8 +917,8 @@ class PromoteExistingStudentForm(forms.ModelForm):
                 self.fields['uniform_fee'].initial = fee.uniform_dues
                 self.fields['promotion_fee'].initial = fee.promotion_fee or Decimal('0.00')
                 self.fields['other_fee'].initial = fee.other_charges or Decimal('0.00')
-        except Exception as e:
-            print(f"Warning: Fee structure error for {target_class}: {e}")
+        except Exception:
+            pass
 
     def clean(self):
         cleaned_data = super().clean()
@@ -953,21 +930,9 @@ class PromoteExistingStudentForm(forms.ModelForm):
         if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify who approved the discount.')
 
-        # Handle Previous Balance Action
-        action = cleaned_data.get('previous_balance_action', 'carry')
-        prev_bal = cleaned_data.get('previous_balance', Decimal('0.00'))
-        received = cleaned_data.get('received', Decimal('0.00'))
-
-        if action == 'apply':
-            cleaned_data['received'] = received + prev_bal
-            cleaned_data['previous_balance'] = Decimal('0.00')
-        elif action == 'waive':
-            cleaned_data['previous_balance'] = Decimal('0.00')
-        # 'carry' keeps original value
-
         total_dues = calculate_total_dues(cleaned_data)
         cleaned_data['total_dues'] = total_dues
-        cleaned_data['balance'] = total_dues - cleaned_data['received']
+        cleaned_data['balance'] = total_dues - cleaned_data.get('received', Decimal('0.00'))
 
         return cleaned_data
 
@@ -975,19 +940,13 @@ class PromoteExistingStudentForm(forms.ModelForm):
         if not self.student_admission:
             raise ValueError("Old admission record is required.")
 
-        # Update Student master record
+        # Update Student (limited fields)
         student = self.student_admission.student
-        student.first_name = self.cleaned_data['first_name']
-        student.last_name = self.cleaned_data['last_name']
-        student.father_guardian_name = self.cleaned_data['father_guardian_name']
-        student.contact = self.cleaned_data['contact']
-        student.date_of_birth = self.cleaned_data['date_of_birth']
-        student.gender = self.cleaned_data['gender']
         if self.cleaned_data.get('image'):
             student.image = self.cleaned_data['image']
         student.save()
 
-        # Force new record creation
+        # Create new admission record
         self.instance.pk = None
         new_admission = super().save(commit=False)
 
@@ -995,21 +954,20 @@ class PromoteExistingStudentForm(forms.ModelForm):
         new_admission.academic_session = AcademicSession.objects.get(is_active=True, school=self.request.user.school)
         new_admission.promoted_from = self.student_admission
         new_admission.promoted = True
-        new_admission.failed_to_promote = False
         new_admission.status = True
         new_admission.operator = self.request.user
         new_admission.admission_date = datetime.date.today()
         new_admission.admission_fee = Decimal('0.00')
-
         new_admission.previous_balance = self.cleaned_data['previous_balance']
         new_admission.received = self.cleaned_data['received']
         new_admission.total_dues = self.cleaned_data['total_dues']
         new_admission.balance = self.cleaned_data['balance']
+        new_admission.closing_balance = self.cleaned_data['balance']
 
         if commit:
             new_admission.save()
 
-            # Create first MonthlyFee for new session
+            # Create first month MonthlyFee
             active_session = new_admission.academic_session
             MonthlyFee.objects.create(
                 student_admission=new_admission,
@@ -1024,7 +982,7 @@ class PromoteExistingStudentForm(forms.ModelForm):
                 operator=self.request.user
             )
 
-            # Mark old admission as promoted
+            # Mark old as promoted
             old = self.student_admission
             old.promoted = True
             old.status = False
