@@ -3,49 +3,132 @@
 
 {% block title %}Create Academic Session{% endblock %}
 
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">New Session</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
 {% block content %}
-<div class="container mt-5">
-    <div class="card shadow rounded">
-        <div class="card-header bg-primary text-white">
-            <h4 class="mb-0">Create New Academic Session</h4>
+<div class="content-area">
+
+    {# ── Onboarding Step Indicator (only during setup wizard) ─── #}
+    {% if request.GET.setup or setup %}
+        {% include 'main_app/partials/_onboarding_steps.html' with current_step=1 %}
+    {% endif %}
+
+    <h4 class="fw-bold mb-4">Academic Session</h4>
+
+    <div class="row g-4">
+
+        {# ── Create Form ─────────────────────────────────────────── #}
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-primary text-white fw-semibold">
+                    <i class="fas fa-plus-circle me-2"></i> Create New Session
+                </div>
+                <div class="card-body">
+                    <form method="post" novalidate>
+                        {% csrf_token %}
+                        {% if request.GET.setup %}
+                            <input type="hidden" name="setup" value="1">
+                        {% endif %}
+
+                        <div class="mb-3">
+                            {{ form.session_name|as_crispy_field }}
+                        </div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-6">{{ form.start_date|as_crispy_field }}</div>
+                            <div class="col-6">{{ form.end_date|as_crispy_field }}</div>
+                        </div>
+
+                        {% if form.errors %}
+                        <div class="alert alert-danger py-2 small">
+                            <ul class="mb-0">
+                                {% for field, errors in form.errors.items %}
+                                    {% for error in errors %}
+                                        <li>{{ field|title }}: {{ error }}</li>
+                                    {% endfor %}
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+
+                        <button type="submit" class="btn btn-success w-100 py-2 fw-semibold">
+                            <i class="fas fa-arrow-right me-2"></i>
+                            Create Session
+                            {% if request.GET.setup %}& Continue to Fee Structure{% endif %}
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            {# ── Session format hint ────────────────────────────── #}
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body py-3">
+                    <div class="small text-muted">
+                        <i class="fas fa-lightbulb text-warning me-2"></i>
+                        <strong>Tip:</strong> Session name convention is
+                        <code>YY-YY</code> (e.g. <code>26-27</code> for April 2026 – March 2027).
+                        The start and end dates define which months appear in the monthly fee chain.
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="card-body">
-            <form method="post" novalidate>
-                {% csrf_token %}
-                <div class="row">
-                    <div class="col-md-6 mb-3">
-                        {{ form.session_name|as_crispy_field }}
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        {{ form.start_date|as_crispy_field }}
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        {{ form.end_date|as_crispy_field }}
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-success">Create Session</button>
-            </form>
 
-            {% if messages %}
-                <div class="alert alert-success mt-4" role="alert">
-                    {% for message in messages %}
-                        {{ message }}
-                    {% endfor %}
+        {# ── Existing Sessions List ──────────────────────────────── #}
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-calendar-alt me-2"></i> All Sessions</span>
+                    <span class="badge bg-primary">{{ sessions|length }}</span>
                 </div>
-            {% endif %}
-
-            {% if form.errors %}
-                <div class="alert alert-danger mt-4" role="alert">
-                    <ul>
-                        {% for field, errors in form.errors.items %}
-                            {% for error in errors %}
-                                <li>{{ field|title }}: {{ error }}</li>
+                {% if sessions %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Session</th>
+                                <th>Start</th>
+                                <th>End</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in sessions %}
+                            <tr>
+                                <td class="fw-semibold">{{ s.session_name }}</td>
+                                <td>{{ s.start_date|date:"d M Y" }}</td>
+                                <td>{{ s.end_date|date:"d M Y" }}</td>
+                                <td>
+                                    {% if s.is_active %}
+                                        <span class="badge bg-success">
+                                            <i class="fas fa-circle me-1" style="font-size:0.5rem;vertical-align:middle;"></i>
+                                            Active
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
                             {% endfor %}
-                        {% endfor %}
-                    </ul>
+                        </tbody>
+                    </table>
                 </div>
-            {% endif %}
+                {% else %}
+                <div class="card-body text-center text-muted py-5">
+                    <i class="fas fa-calendar-xmark fa-3x mb-3 opacity-25"></i>
+                    <div>No sessions yet. Create your first session above.</div>
+                </div>
+                {% endif %}
+            </div>
         </div>
+
     </div>
 </div>
 {% endblock %}

@@ -1,7 +1,7 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
 
-{% block title %}Monthly Fee - {{ student.student.first_name }} {{ student.student.last_name }}{% endblock %}
+{% block title %}Monthly Fee — {{ student.student.first_name }} {{ student.student.last_name }}{% endblock %}
 
 {% block breadcrumb %}
 <div class="mb-4">
@@ -9,199 +9,506 @@
         <ol class="breadcrumb mb-0">
             <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
             <li class="breadcrumb-item"><a href="{% url 'monthly_fee' %}">Monthly Fee</a></li>
-            <li class="breadcrumb-item active">{{ student.student.first_name }} {{ student.student.last_name }}</li>
+            <li class="breadcrumb-item active">
+                {{ student.student.first_name }} {{ student.student.last_name }}
+            </li>
         </ol>
     </nav>
 </div>
 {% endblock %}
 
 {% block content %}
-
 <div class="content-area">
+
+    
     <div class="card shadow-sm border-0 mb-4">
-    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
-
-        <div class="d-flex align-items-center gap-3">
-
-            <div class="avatar-circle">
-                {{ student.student.first_name|slice:":1" }}
-            </div>
-
-            <div>
-                <h4 class="fw-bold mb-1">
-                    {{ student.student.first_name }}
-                    {{ student.student.last_name }}
-                </h4>
-
-                <div class="text-muted">
-
-                    <span class="badge bg-primary-subtle text-primary">
-                        {{ student.class_name }}
-                    </span>
-
-                    <span class="badge bg-secondary-subtle text-secondary">
-                        Section {{ student.section }}
-                    </span>
-
-                    <span class="ms-2">
-                        ID:
-                        <strong>{{ student.student.student_id }}</strong>
-                    </span>
-
+        <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-3">
+            <div class="d-flex align-items-center gap-3">
+                <div class="avatar-circle">{{ student.student.first_name|slice:":1" }}</div>
+                <div>
+                    <h4 class="fw-bold mb-1">
+                        {{ student.student.first_name }} {{ student.student.last_name }}
+                    </h4>
+                    <div class="text-muted small">
+                        <span class="badge bg-primary-subtle text-primary">{{ student.class_name }}</span>
+                        <span class="badge bg-secondary-subtle text-secondary ms-1">
+                            Section {{ student.section }}
+                        </span>
+                        <span class="ms-2">ID: <strong>{{ student.student.student_id }}</strong></span>
+                        <span class="ms-2">Roll: <strong>{{ student.roll_number }}</strong></span>
+                        {% if student.transport == 'Paid' %}
+                            <span class="badge bg-info-subtle text-info ms-2">
+                                <i class="fas fa-bus me-1"></i>Transport
+                            </span>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
-
+            <a href="{% url 'monthly_fee' %}" class="btn btn-outline-secondary btn-sm">
+                <i class="fas fa-arrow-left me-1"></i> Back
+            </a>
         </div>
+    </div>
 
-        <a href="{% url 'monthly_fee' %}"
-           class="btn btn-outline-primary">
 
-            <i class="fas fa-arrow-left me-2"></i>
-            Back
 
-        </a>
-
+    
+    {# ── Session Summary Bar ──────────────────────────────────── #}
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body py-3">
+        <div class="row g-3 text-center">
+            <div class="col-6 col-md-3">
+                <div class="p-2 rounded bg-light">
+                    <div class="small text-muted">Session</div>
+                    <div class="fw-bold text-primary">{{ active_session.session_name }}</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="p-2 rounded bg-danger-subtle">
+                    <div class="small text-muted">Total Dues</div>
+                    <div class="fw-bold text-danger">Rs {{ summary_dues|floatformat:2 }}</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="p-2 rounded bg-success-subtle">
+                    <div class="small text-muted">Total Received</div>
+                    <div class="fw-bold text-success">Rs {{ summary_received|floatformat:2 }}</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="p-2 rounded bg-warning-subtle">
+                    <div class="small text-muted">Outstanding</div>
+                    <div class="fw-bold text-warning">Rs {{ summary_outstanding|floatformat:2 }}</div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
-    {% if active_session %}
-        <p class="text-primary mb-4">
-            <i class="fas fa-calendar-check"></i> 
-            Academic Session: <strong>{{ active_session.session_name }}</strong>
-        </p>
-    {% endif %}
-
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
-    <!-- Months Grid -->
-
     
+     
+     
+       
+       
+      
     <div class="row g-4">
-        {% for data in month_data %}
-        <div class="col-lg-6 col-xl-4">
-            <div class="card h-100 shadow-sm">
-                <div class="card-header bg-light">
-                    <h5 class="mb-0 fw-semibold">
-                        {{ data.month }} {{ data.year }}
-                        <span class="badge float-end bg-{% if data.status == 'Paid' %}success{% else %}warning{% endif %}">
-                            {{ data.status }}
-                        </span>
-                    </h5>
+
+    {% for data in month_data %}
+
+        
+        {% if data.fee and data.fee.has_payment %}
+
+            {% if data.fee.current_balance == 0 %}
+            {# Fully paid #}
+            <div class="col-lg-6 col-xl-4">
+            <div class="card h-100 shadow-sm border-0 month-card"
+                 data-total-dues="{{ data.fee.total_dues }}"
+                 data-received="{{ data.fee.received }}"
+                 data-balance="0">
+
+                <div class="card-header bg-success-subtle d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-semibold">{{ data.month }} {{ data.year }}</h6>
+                    <span class="badge bg-success">Paid</span>
                 </div>
-
-                
-
-
-                <div class="card-body">
-                    {% if data.fee %}
-                        <!-- Already Paid -->
-                        <div class="row text-center mb-3">
-                            <div class="col-6">
-                                <small class="text-muted">Total Dues</small><br>
-                                <strong>Rs {{ data.fee.total_dues|floatformat:2 }}</strong>
-                            </div>
-                            <div class="col-6">
-                                <small class="text-muted">Received</small><br>
-                                <strong class="text-success">Rs {{ data.fee.received|floatformat:2 }}</strong>
+                <div class="card-body p-3">
+                    <div class="row g-2 text-center mb-2">
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Prev. Balance</div>
+                                <div class="fw-semibold">Rs {{ data.fee.previous_balance|floatformat:2 }}</div>
                             </div>
                         </div>
-                        <div class="alert alert-success py-2 text-center">
-                            <strong>Payment Recorded</strong>
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Monthly Fee</div>
+                                <div class="fw-semibold">Rs {{ data.fee.monthly_fee|floatformat:2 }}</div>
+                            </div>
                         </div>
-                    {% elif data.form %}
-                        <!-- Payment Form -->
-                        <form method="post" action="{% url 'monthly_fee_detail' student.student.student_id %}">
-                            {% csrf_token %}
-                            {{ data.form.non_field_errors }}
-                            {% for hidden in data.form.hidden_fields %}
-                                {{ hidden }}
-                            {% endfor %}
-
-                            <div class="mb-3">
-                                <label class="form-label">Previous Balance</label>
-                                <input type="text" class="form-control bg-light" 
-                                       value="Rs {{ data.form.previous_balance.value|floatformat:2 }}" readonly>
+                        {% if data.fee.transport_fee %}
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Transport</div>
+                                <div class="fw-semibold">Rs {{ data.fee.transport_fee|floatformat:2 }}</div>
                             </div>
-
-                            <div class="row g-3">
-                                <div class="col-6">
-                                    <label class="form-label">Monthly Fee</label>
-                                    <input type="text" class="form-control bg-light" 
-                                           value="Rs {{ data.form.monthly_fee.value|floatformat:2 }}" readonly>
-                                </div>
-                                <div class="col-6">
-                                    <label class="form-label">Transport Fee</label>
-                                    <input type="text" class="form-control bg-light" 
-                                           value="Rs {{ data.form.transport_fee.value|floatformat:2 }}" readonly>
-                                </div>
+                        </div>
+                        {% endif %}
+                        <div class="col-{% if data.fee.transport_fee %}6{% else %}12{% endif %}">
+                            <div class="p-2 rounded bg-danger-subtle">
+                                <div class="small text-muted">Total Dues</div>
+                                <div class="fw-bold text-danger">Rs {{ data.fee.total_dues|floatformat:2 }}</div>
                             </div>
-
-                            <div class="mb-3 mt-3">
-                                <label class="form-label fw-semibold">Total Dues</label>
-                                <input type="text" class="form-control bg-light fw-bold" 
-                                       value="Rs {{ data.form.total_dues.value|floatformat:2 }}" readonly>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div class="row g-2 text-center">
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-success-subtle">
+                                <div class="small text-muted">Received</div>
+                                <div class="fw-bold text-success">Rs {{ data.fee.received|floatformat:2 }}</div>
                             </div>
-
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold text-primary">Amount Received</label>
-                                <input type="number" name="received" step="0.01" 
-                                       value="{{ data.form.received.value|default:'0.00' }}" 
-                                       class="form-control form-control-lg received-input" required>
-                                {% if data.form.received.errors %}
-                                    <div class="text-danger small">{{ data.form.received.errors }}</div>
-                                {% endif %}
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-success-subtle">
+                                <div class="small text-muted">Balance</div>
+                                <div class="fw-bold text-success">Rs 0.00</div>
                             </div>
-
-                            <div class="mb-3">
-                                <label class="form-label">Reviewed By</label>
-                                <input type="text" name="reviewed_by" 
-                                       value="{{ data.form.reviewed_by.value|default:request.user.username }}" 
-                                       class="form-control">
-                            </div>
-
-                            <button type="submit" class="btn btn-success w-100 py-3">
-                                <i class="fas fa-save"></i> Save Payment
-                            </button>
-                        </form>
+                        </div>
+                    </div>
+                    {% if data.fee.payment_date %}
+                    <div class="text-center mt-2">
+                        <small class="text-muted">
+                            <i class="fas fa-check-circle text-success me-1"></i>
+                            {{ data.fee.payment_date|date:"d M Y" }}
+                            {% if data.fee.reviewed_by %} · {{ data.fee.reviewed_by }}{% endif %}
+                        </small>
+                    </div>
                     {% endif %}
                 </div>
             </div>
-        </div>
-        {% endfor %}
-    </div>
-</div>
+            </div>
 
+            {% else %}
+        
+            <div class="col-lg-6 col-xl-4">
+            <div class="card h-100 shadow-sm border-warning month-card"
+                 data-total-dues="{{ data.fee.total_dues }}"
+                 data-received="{{ data.fee.received }}"
+                 data-balance="{{ data.fee.current_balance }}">
+
+                <div class="card-header bg-warning-subtle d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0 fw-semibold">{{ data.month }} {{ data.year }}</h6>
+                    <span class="badge bg-warning text-dark">Partial</span>
+                </div>
+                <div class="card-body p-3">
+                    <div class="row g-2 text-center mb-2">
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Prev. Balance</div>
+                                <div class="fw-semibold">Rs {{ data.fee.previous_balance|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Monthly Fee</div>
+                                <div class="fw-semibold">Rs {{ data.fee.monthly_fee|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                        {% if data.fee.transport_fee %}
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-light">
+                                <div class="small text-muted">Transport</div>
+                                <div class="fw-semibold">Rs {{ data.fee.transport_fee|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                        <div class="col-{% if data.fee.transport_fee %}6{% else %}12{% endif %}">
+                            <div class="p-2 rounded bg-danger-subtle">
+                                <div class="small text-muted">Total Dues</div>
+                                <div class="fw-bold text-danger">Rs {{ data.fee.total_dues|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="my-2">
+                    <div class="row g-2 text-center">
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-success-subtle">
+                                <div class="small text-muted">Received</div>
+                                <div class="fw-bold text-success">Rs {{ data.fee.received|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                        <div class="col-6">
+                            <div class="p-2 rounded bg-warning-subtle">
+                                <div class="small text-muted">Remaining</div>
+                                <div class="fw-bold text-warning">Rs {{ data.fee.current_balance|floatformat:2 }}</div>
+                            </div>
+                        </div>
+                    </div>
+                    {% if data.fee.payment_date %}
+                    <div class="text-center mt-2">
+                        <small class="text-muted">
+                            <i class="fas fa-clock text-warning me-1"></i>
+                            Last paid {{ data.fee.payment_date|date:"d M Y" }}
+                            {% if data.fee.reviewed_by %} · {{ data.fee.reviewed_by }}{% endif %}
+                        </small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            </div>
+            {% endif %}
+
+        
+    
+        {% elif data.form %}
+
+        
+            {% if data.fee %}
+                {% with prev_bal=data.fee.previous_balance monthly=data.fee.monthly_fee transport=data.fee.transport_fee total=data.fee.total_dues %}
+                <div class="col-lg-6 col-xl-4">
+                <div class="card h-100 shadow-sm border-0 month-card"
+                     data-total-dues="{{ total }}"
+                     data-received="0"
+                     data-balance="{{ total }}">
+
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-semibold">{{ data.month }} {{ data.year }}</h6>
+                        <span class="badge bg-secondary">Pending</span>
+                    </div>
+                    <div class="card-body p-3">
+                        <form method="post"
+                              action="{% url 'monthly_fee_detail' student.student.student_id %}"
+                              class="fee-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="month"            value="{{ data.month }}">
+                            <input type="hidden" name="year"             value="{{ data.year }}">
+                            <input type="hidden" name="previous_balance" value="{{ prev_bal }}">
+                            <input type="hidden" name="monthly_fee"      value="{{ monthly }}">
+                            <input type="hidden" name="transport_fee"    value="{{ transport }}">
+                            <input type="hidden" name="total_dues"       value="{{ total }}">
+
+                            <div class="row g-2 text-center mb-3">
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Prev. Balance</div>
+                                        <div class="fw-semibold">Rs {{ prev_bal|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Monthly Fee</div>
+                                        <div class="fw-semibold">Rs {{ monthly|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                {% if transport %}
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Transport</div>
+                                        <div class="fw-semibold">Rs {{ transport|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                <div class="col-{% if transport %}6{% else %}12{% endif %}">
+                                    <div class="p-2 rounded bg-danger-subtle">
+                                        <div class="small text-muted">Total Dues</div>
+                                        <div class="fw-bold text-danger">Rs {{ total|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="my-2">
+
+                            <div class="mb-2">
+                                <label class="form-label fw-semibold text-primary small mb-1">
+                                    Amount Received
+                                </label>
+                                <input type="number"
+                                       name="received"
+                                       class="form-control form-control-lg received-input"
+                                       step="0.01"
+                                       min="0"
+                                       value="0.00"
+                                       placeholder="Enter amount"
+                                       required>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+                                <small class="text-muted">Remaining after payment:</small>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="fw-bold live-balance text-danger">
+                                        Rs {{ total|floatformat:2 }}
+                                    </span>
+                                    <span class="live-badge badge bg-secondary">No Payment</span>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label small text-muted mb-1">Reviewed By</label>
+                                <input type="text"
+                                       name="reviewed_by"
+                                       class="form-control form-control-sm"
+                                       value="{{ request.user.username }}">
+                            </div>
+
+                            <button type="submit" class="btn btn-success w-100">
+                                <i class="fas fa-save me-1"></i> Save Payment
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                </div>
+                {% endwith %}
+
+            {% else %}
+        
+                {% with prev_bal=data.form.previous_balance.value|default:'0.00' monthly=data.form.monthly_fee.value|default:'0.00' transport=data.form.transport_fee.value|default:'0.00' total=data.form.total_dues.value|default:'0.00' %}
+                <div class="col-lg-6 col-xl-4">
+                <div class="card h-100 shadow-sm border-0 month-card"
+                     data-total-dues="{{ total }}"
+                     data-received="0"
+                     data-balance="{{ total }}">
+
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <h6 class="mb-0 fw-semibold">{{ data.month }} {{ data.year }}</h6>
+                        <span class="badge bg-secondary">Pending</span>
+                    </div>
+                    <div class="card-body p-3">
+                        <form method="post"
+                              action="{% url 'monthly_fee_detail' student.student.student_id %}"
+                              class="fee-form">
+                            {% csrf_token %}
+                            <input type="hidden" name="month"            value="{{ data.month }}">
+                            <input type="hidden" name="year"             value="{{ data.year }}">
+                            <input type="hidden" name="previous_balance" value="{{ prev_bal }}">
+                            <input type="hidden" name="monthly_fee"      value="{{ monthly }}">
+                            <input type="hidden" name="transport_fee"    value="{{ transport }}">
+                            <input type="hidden" name="total_dues"       value="{{ total }}">
+
+                            <div class="row g-2 text-center mb-3">
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Prev. Balance</div>
+                                        <div class="fw-semibold">Rs {{ prev_bal|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Monthly Fee</div>
+                                        <div class="fw-semibold">Rs {{ monthly|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                {% if transport and transport != '0.00' %}
+                                <div class="col-6">
+                                    <div class="p-2 rounded bg-light">
+                                        <div class="small text-muted">Transport</div>
+                                        <div class="fw-semibold">Rs {{ transport|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                <div class="col-{% if transport and transport != '0.00' %}6{% else %}12{% endif %}">
+                                    <div class="p-2 rounded bg-danger-subtle">
+                                        <div class="small text-muted">Total Dues</div>
+                                        <div class="fw-bold text-danger">Rs {{ total|floatformat:2 }}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <hr class="my-2">
+
+                            <div class="mb-2">
+                                <label class="form-label fw-semibold text-primary small mb-1">
+                                    Amount Received
+                                </label>
+                                <input type="number"
+                                       name="received"
+                                       class="form-control form-control-lg received-input"
+                                       step="0.01"
+                                       min="0"
+                                       value="0.00"
+                                       placeholder="Enter amount"
+                                       required>
+                            </div>
+
+                            <div class="d-flex justify-content-between align-items-center mb-3 px-1">
+                                <small class="text-muted">Remaining after payment:</small>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="fw-bold live-balance text-danger">
+                                        Rs {{ total|floatformat:2 }}
+                                    </span>
+                                    <span class="live-badge badge bg-secondary">No Payment</span>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label small text-muted mb-1">Reviewed By</label>
+                                <input type="text"
+                                       name="reviewed_by"
+                                       class="form-control form-control-sm"
+                                       value="{{ request.user.username }}">
+                            </div>
+
+                            <button type="submit" class="btn btn-success w-100">
+                                <i class="fas fa-save me-1"></i> Save Payment
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                </div>
+                {% endwith %}
+            {% endif %}
+
+        {% endif %}
+    {% endfor %}
+
+    </div>{# /row #}
+</div>
 {% endblock %}
+
 
 {% block extra_js %}
 <script>
-$(document).ready(function() {
-    $('.received-input').on('input', function() {
-        // Optional: You can add live calculation here if needed later
+document.addEventListener('DOMContentLoaded', function () {
+
+    // ── Live balance calculation per card ─────────────────────
+    document.querySelectorAll('.received-input').forEach(function (input) {
+        var card       = input.closest('.month-card');
+        var totalDues  = parseFloat(card.dataset.totalDues || '0');
+        var liveBalance = card.querySelector('.live-balance');
+        var liveBadge   = card.querySelector('.live-badge');
+
+        function update() {
+            var received  = Math.max(parseFloat(input.value) || 0, 0);
+            var remaining = Math.max(totalDues - received, 0);
+
+            if (liveBalance) {
+                liveBalance.textContent = 'Rs ' + remaining.toFixed(2);
+                liveBalance.className = 'fw-bold live-balance ' + (
+                    remaining === 0 ? 'text-success' :
+                    received  >  0  ? 'text-warning' : 'text-danger'
+                );
+            }
+            if (liveBadge) {
+                if (received >= totalDues && totalDues > 0) {
+                    liveBadge.className   = 'live-badge badge bg-success';
+                    liveBadge.textContent = 'Fully Paid';
+                } else if (received > 0) {
+                    liveBadge.className   = 'live-badge badge bg-warning text-dark';
+                    liveBadge.textContent = 'Partial';
+                } else {
+                    liveBadge.className   = 'live-badge badge bg-secondary';
+                    liveBadge.textContent = 'No Payment';
+                }
+            }
+        }
+
+        input.addEventListener('input', update);
+        update();
     });
+
+    // ── Disable submit while saving ───────────────────────────
+    document.querySelectorAll('form.fee-form').forEach(function (f) {
+        f.addEventListener('submit', function () {
+            var btn = f.querySelector('button[type="submit"]');
+            if (btn) {
+                btn.disabled  = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving…';
+            }
+        });
+    });
+
 });
 
-
-
-
-$('form').on('submit', function(){
-
-const btn = $(this).find('button[type="submit"]');
-
-btn.prop('disabled', true);
-
-btn.html(`
-<span class="spinner-border spinner-border-sm me-2"></span>
-Saving...
-`);
-
+// ── Reset stuck "Saving..." button when page is restored from   ─
+// browser back/forward cache (bfcache) instead of freshly loaded.
+// DOMContentLoaded does NOT fire on a bfcache restore, so without
+// this, the spinner state from before you clicked "Save Payment"
+// stays frozen on screen until a manual refresh.
+window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+        document.querySelectorAll('form.fee-form button[type="submit"]').forEach(function (btn) {
+            btn.disabled  = false;
+            btn.innerHTML = '<i class="fas fa-save me-1"></i> Save Payment';
+        });
+    }
 });
 </script>
 {% endblock %}

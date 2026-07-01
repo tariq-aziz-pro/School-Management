@@ -1,0 +1,289 @@
+{% extends 'main_app/base.html' %}
+
+{% block title %}Timetable{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Timetable</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="content-area">
+
+    {# ── Header ────────────────────────────────────────────────── #}
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">Class Timetable</h4>
+            <small class="text-muted">Session: {{ active_session.session_name }}
+                {% if school.open_time %} &bull; {{ school.open_time|time:"H:i" }} – {{ school.close_time|time:"H:i" }}{% endif %}
+            </small>
+        </div>
+        <a href="{% url 'period_manage' %}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-clock me-1"></i> Manage Periods
+        </a>
+    </div>
+
+    {% if not periods %}
+    <div class="alert alert-warning">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        No periods defined yet.
+        <a href="{% url 'period_manage' %}" class="alert-link">Set up periods first</a>
+        before creating a timetable.
+    </div>
+    {% else %}
+
+    {# ── Class / Section Selector ──────────────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small">Class</label>
+                    <select name="class_name" class="form-select" id="class-select">
+                        <option value="">Select Class</option>
+                        {% for cs in class_sections %}
+                        <option value="{{ cs.class_name }}"
+                                {% if cs.class_name == selected_class %}selected{% endif %}>
+                            {{ cs.class_name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small">Section</label>
+                    <select name="section" class="form-select" id="section-select">
+                        <option value="">Select Section</option>
+                        {% for cs in class_sections %}
+                        <option value="{{ cs.section }}"
+                                data-class="{{ cs.class_name }}"
+                                {% if cs.section == selected_section and cs.class_name == selected_class %}selected{% endif %}>
+                            {{ cs.section }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-table me-1"></i> Load Timetable
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {# ── Conflict Warnings ─────────────────────────────────────── #}
+    {% if conflicts %}
+    <div class="alert alert-warning border-0 shadow-sm mb-4">
+        <div class="fw-semibold mb-1"><i class="fas fa-exclamation-triangle me-2"></i> Teacher Conflicts Detected</div>
+        <ul class="mb-0 small">
+            {% for c in conflicts %}<li>{{ c }}</li>{% endfor %}
+        </ul>
+        <div class="small text-muted mt-1">
+            These are warnings only — the timetable has been saved. You can reassign teachers to resolve conflicts.
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Timetable Grid ────────────────────────────────────────── #}
+    {% if selected_class and selected_section %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <span class="fw-semibold">
+                {{ selected_class }} — Section {{ selected_section }}
+            </span>
+            <span class="badge bg-primary">{{ grid|length }} Period(s)</span>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:160px;">Period</th>
+                            <th style="width:130px;">Time</th>
+                            <th>Subject</th>
+                            <th>Teacher</th>
+                            <th style="width:100px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in grid %}
+                        <tr class="{% if row.period.is_break %}table-secondary{% endif %}
+                                   {% if row.conflicts %}table-warning{% endif %}">
+
+                            {# Period name #}
+                            <td class="fw-semibold">
+                                {{ row.period.name }}
+                                {% if row.period.is_break %}
+                                    <span class="badge bg-secondary ms-1">Break</span>
+                                {% endif %}
+                                {% if row.conflicts %}
+                                    <i class="fas fa-exclamation-triangle text-warning ms-1"
+                                       title="{{ row.conflicts|join:', ' }}"></i>
+                                {% endif %}
+                            </td>
+
+                            {# Time #}
+                            <td class="text-muted small">
+                                {{ row.period.start_time|time:"H:i" }} – {{ row.period.end_time|time:"H:i" }}
+                            </td>
+
+                            {% if row.period.is_break %}
+                            {# Break row — no subject/teacher #}
+                            <td colspan="3" class="text-muted fst-italic small">— Break —</td>
+
+                            {% else %}
+                            {# Editable slot #}
+                            <td>
+                                <select class="form-select form-select-sm subject-select"
+                                        data-period="{{ row.period.id }}"
+                                        id="subject_{{ row.period.id }}">
+                                    <option value="">— Select Subject —</option>
+                                    {% comment %}Options populated by JS from subjects_json{% endcomment %}
+                                </select>
+                            </td>
+                            <td>
+                                <select class="form-select form-select-sm teacher-select"
+                                        data-period="{{ row.period.id }}"
+                                        id="teacher_{{ row.period.id }}">
+                                    <option value="">— Select Teacher —</option>
+                                    {% comment %}Options populated by JS from teachers_json{% endcomment %}
+                                </select>
+                            </td>
+                            <td>
+                                <form method="post" action="{% url 'timetable_save' %}" class="slot-form">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="class_name" value="{{ selected_class }}">
+                                    <input type="hidden" name="section"    value="{{ selected_section }}">
+                                    <input type="hidden" name="period_id"  value="{{ row.period.id }}">
+                                    <input type="hidden" name="subject_id" class="hidden-subject" value="{{ row.slot_subject_id|default:'' }}">
+                                    <input type="hidden" name="teacher_id" class="hidden-teacher" value="{{ row.slot_teacher_id|default:'' }}">
+                                    <button type="submit" class="btn btn-sm btn-success">
+                                        <i class="fas fa-save"></i>
+                                    </button>
+                                </form>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {# ── Initial slot data for JS ───────────────────────────────── #}
+    <script>
+    var SELECTED_SUBJECT = {};
+    var SELECTED_TEACHER = {};
+    {% for row in grid %}
+    {% if not row.period.is_break %}
+    SELECTED_SUBJECT[{{ row.period.id }}] = {{ row.slot_subject_id|default:"null" }};
+    SELECTED_TEACHER[{{ row.period.id }}] = {{ row.slot_teacher_id|default:"null" }};
+    {% endif %}
+    {% endfor %}
+    </script>
+
+    {% elif selected_class or selected_section %}
+    <div class="alert alert-info">Please select both a class and a section to view the timetable.</div>
+    {% endif %}
+
+    {% endif %}{# end if periods #}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var subjects = {{ subjects_json|safe }};
+var teachers = {{ teachers_json|safe }};
+
+// ── Filter section options when class changes ───────────────
+document.getElementById('class-select').addEventListener('change', function () {
+    var cls  = this.value;
+    var sect = document.getElementById('section-select');
+    Array.from(sect.options).forEach(function (opt) {
+        if (!opt.value) return;
+        opt.style.display = (!cls || opt.dataset.class === cls) ? '' : 'none';
+    });
+    sect.value = '';
+});
+
+// ── Populate subject/teacher dropdowns and sync hidden inputs ──
+document.addEventListener('DOMContentLoaded', function () {
+
+    // Populate all subject dropdowns
+    document.querySelectorAll('.subject-select').forEach(function (sel) {
+        var pid = parseInt(sel.dataset.period);
+        subjects.forEach(function (s) {
+            var opt = document.createElement('option');
+            opt.value       = s.id;
+            opt.textContent = s.name;
+            if (SELECTED_SUBJECT[pid] === s.id) opt.selected = true;
+            sel.appendChild(opt);
+        });
+
+        // When subject changes, filter teachers to only those who teach it
+        sel.addEventListener('change', function () {
+            var subjectId = parseInt(this.value) || null;
+            filterTeachers(pid, subjectId);
+            // Update hidden input
+            var form = document.querySelector('.slot-form input[name="period_id"][value="' + pid + '"]')
+                        ?.closest('form');
+            if (form) form.querySelector('.hidden-subject').value = this.value;
+        });
+    });
+
+    // Populate all teacher dropdowns
+    document.querySelectorAll('.teacher-select').forEach(function (sel) {
+        var pid = parseInt(sel.dataset.period);
+        teachers.forEach(function (t) {
+            var opt = document.createElement('option');
+            opt.value            = t.id;
+            opt.textContent      = t.name;
+            opt.dataset.subjects = JSON.stringify(t.subjects);
+            if (SELECTED_TEACHER[pid] === t.id) opt.selected = true;
+            sel.appendChild(opt);
+        });
+
+        sel.addEventListener('change', function () {
+            var form = document.querySelector('.slot-form input[name="period_id"][value="' + pid + '"]')
+                        ?.closest('form');
+            if (form) form.querySelector('.hidden-teacher').value = this.value;
+        });
+    });
+
+    // Initial teacher filter pass (for pre-selected subjects on load)
+    document.querySelectorAll('.subject-select').forEach(function (sel) {
+        var pid = parseInt(sel.dataset.period);
+        filterTeachers(pid, parseInt(sel.value) || null);
+    });
+
+});
+
+function filterTeachers(pid, subjectId) {
+    var teacherSel = document.getElementById('teacher_' + pid);
+    if (!teacherSel) return;
+    Array.from(teacherSel.options).forEach(function (opt) {
+        if (!opt.value) return;   // keep "Select Teacher" option always visible
+        if (!subjectId) {
+            opt.style.display = '';   // no subject selected — show all teachers
+            return;
+        }
+        var subs = JSON.parse(opt.dataset.subjects || '[]');
+        opt.style.display = subs.includes(subjectId) ? '' : 'none';
+    });
+    // If the currently selected teacher is no longer visible, reset selection
+    var selected = teacherSel.options[teacherSel.selectedIndex];
+    if (selected && selected.style.display === 'none') {
+        teacherSel.value = '';
+        var form = document.querySelector('.slot-form input[name="period_id"][value="' + pid + '"]')
+                    ?.closest('form');
+        if (form) form.querySelector('.hidden-teacher').value = '';
+    }
+}
+</script>
+{% endblock %}

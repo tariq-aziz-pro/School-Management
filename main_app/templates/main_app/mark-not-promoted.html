@@ -1,0 +1,112 @@
+{% extends 'main_app/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container mt-5">
+    <h2>Not Promote: {{ student.student.first_name }} {{ student.student.last_name }}</h2>
+
+    <div class="alert alert-warning">
+        <strong>{{ current_class }}</strong> stays the same — student did not advance to the next class
+        for academic session <strong>{{ active_session.session_name }}</strong>.
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div class="row">
+            <div class="col-md-6">
+                <h4 class="mb-3">Personal Details</h4>
+                {{ form.first_name|as_crispy_field }}
+                {{ form.last_name|as_crispy_field }}
+                {{ form.father_guardian_name|as_crispy_field }}
+                {{ form.contact|as_crispy_field }}
+                {{ form.date_of_birth|as_crispy_field }}
+                {{ form.gender|as_crispy_field }}
+                {{ form.image|as_crispy_field }}
+            </div>
+
+            <div class="col-md-6">
+                <h4 class="mb-3">Academic Details</h4>
+                {{ form.class_name|as_crispy_field }} {# disabled — always shows old class #}
+                {{ form.section|as_crispy_field }}
+                {{ form.roll_number|as_crispy_field }}
+
+                <h5 class="mt-4 mb-3">Transport Details</h5>
+                {{ form.transport|as_crispy_field }}
+                <div id="transport-fields">
+                    {{ form.vehicle_no|as_crispy_field }}
+                    {{ form.route|as_crispy_field }}
+                    {{ form.driver_contact|as_crispy_field }}
+                    {{ form.transport_fee|as_crispy_field }}
+                </div>
+
+                <h4 class="mt-4 mb-3">Fee Details</h4>
+                {{ form.previous_balance|as_crispy_field }}
+
+                {{ form.tuition_fee|as_crispy_field }}
+                {{ form.exam_fee|as_crispy_field }}
+                {{ form.book_fee|as_crispy_field }}
+                {{ form.uniform_fee|as_crispy_field }}
+                {{ form.other_fee|as_crispy_field }}
+                {{ form.discount|as_crispy_field }}
+                {{ form.discount_behalf|as_crispy_field }}
+                {{ form.received|as_crispy_field }}
+
+                <div class="mt-3 border-top pt-3">
+                    {{ form.total_dues|as_crispy_field }}
+                    {{ form.balance|as_crispy_field }}
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <button type="submit" class="btn btn-danger px-5">Mark as Not Promoted</button>
+            <a href="{% url 'promote_existing_students' %}?class_name={{ filtered_class|urlencode }}&section={{ filtered_section|urlencode }}"
+                class="btn btn-secondary px-4">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script>
+    $(document).ready(function () {
+        var feeStructures = {{ fee_structures| safe}};
+
+    function calculateTotals() {
+        var previous_balance = parseFloat($('#id_previous_balance').val()) || 0;
+        var tuition = parseFloat($('#id_tuition_fee').val()) || 0;
+        var exam = parseFloat($('#id_exam_fee').val()) || 0;
+        var book = parseFloat($('#id_book_fee').val()) || 0;
+        var uniform = parseFloat($('#id_uniform_fee').val()) || 0;
+        var other = parseFloat($('#id_other_fee').val()) || 0;
+        var transport = parseFloat($('#id_transport_fee').val()) || 0;
+        var discount = parseFloat($('#id_discount').val()) || 0;
+        var received = parseFloat($('#id_received').val()) || 0;
+
+        var total = previous_balance + tuition + exam + book + uniform + other + transport - discount;
+        var balance = total - received;
+
+        $('#id_total_dues').val(total.toFixed(2));
+        $('#id_balance').val(balance.toFixed(2));
+    }
+
+    function updateTransportFields() {
+        var val = $('#id_transport').val();
+        if (val === 'No' || val === 'Free') {
+            $('#id_transport_fee').val('0.00');
+        }
+        calculateTotals();
+    }
+
+    $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_transport_fee, #id_discount, #id_received')
+        .on('input change', calculateTotals);
+
+    $('#id_transport').on('change', updateTransportFields);
+
+    updateTransportFields();
+    calculateTotals();
+    });
+</script>
+{% endblock %}

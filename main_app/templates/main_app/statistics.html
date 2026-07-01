@@ -1,47 +1,292 @@
-{% extends 'main_app/analytics_base.html' %}
+{% extends 'main_app/base.html' %}
 
-{% block analytics_content %}
-<div class="container mt-4">
-    <h2 class="mb-4 text-center">📊 School Statistics Dashboard</h2>
+{% block title %}School Statistics{% endblock %}
 
-    <div class="container my-4">
-    <h4 class="mb-3">Summary: Students by Class</h4>
-    <div class="row">
-        {% for summary in class_summary %}
-        <div class="col-md-3 mb-3">
-            <div class="card border-info text-center">
-                <div class="card-body">
-                    <h5 class="card-title">{{ summary.class_name }}</h5>
-                    <p class="card-text">{{ summary.count }} Students</p>
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Statistics</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="content-area">
+
+    {# ── Header ────────────────────────────────────────────────── #}
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">School Statistics</h4>
+            <small class="text-muted">
+                {% if active_session %}
+                    Current session: <strong>{{ active_session.session_name }}</strong>
+                    &bull; {{ active_session.start_date|date:"d M Y" }} – {{ active_session.end_date|date:"d M Y" }}
+                {% else %}
+                    No active session
+                {% endif %}
+            </small>
+        </div>
+        <a href="{% url 'analytics' %}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-chart-line me-1"></i> Advanced Analytics
+        </a>
+    </div>
+
+    {% if not active_session %}
+    <div class="alert alert-warning text-center py-5">
+        <i class="fas fa-calendar-xmark fa-3x mb-3 text-warning"></i>
+        <h5>No Active Session Found</h5>
+        <a href="{% url 'create_session' %}" class="btn btn-primary mt-2">Create Session</a>
+    </div>
+    {% else %}
+
+    {# ── Student Stat Cards ────────────────────────────────────── #}
+    <h6 class="fw-semibold text-muted text-uppercase letter-spacing mb-3">
+        <i class="fas fa-users me-2"></i> Students
+    </h6>
+    <div class="row g-3 mb-4">
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#1e88e5,#42a5f5);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-users fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.total_students }}</div>
+                        <div class="small opacity-85">Total</div>
+                    </div>
                 </div>
             </div>
         </div>
-        {% endfor %}
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#43a047,#66bb6a);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-user-plus fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.new_admissions }}</div>
+                        <div class="small opacity-85">New</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#8e24aa,#ab47bc);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-user-graduate fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.promoted_count }}</div>
+                        <div class="small opacity-85">Promoted</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#fb8c00,#ffa726);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-user-clock fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.not_promoted_count }}</div>
+                        <div class="small opacity-85">Not Promoted</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#00897b,#26a69a);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-bus fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.transport_paid_count }}</div>
+                        <div class="small opacity-85">Transport (Paid)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#546e7a,#78909c);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-bus-simple fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ student_stats.transport_free_count }}</div>
+                        <div class="small opacity-85">Transport (Free)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
-</div>
 
+    {# ── Fee Stat Cards ────────────────────────────────────────── #}
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-hand-holding-usd me-2"></i> Fees
+    </h6>
+    <div class="row g-3 mb-4">
 
-
-    <div class="row g-4">
-        {% for card in cards %}
-        <div class="col-md-4">
-            <div class="card border-{{ card.color }} shadow-sm h-100">
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
                 <div class="card-body text-center">
-                    <h5 class="card-title text-{{ card.color }}">{{ card.title }}</h5>
-                    <p class="card-text display-6 fw-bold">{{ card.value }}</p>
+                    <div class="small text-muted mb-1">Total Billed</div>
+                    <div class="fw-bold fs-5">Rs {{ gross_billed|floatformat:0 }}</div>
                 </div>
             </div>
         </div>
-        {% endfor %}
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">Collected</div>
+                    <div class="fw-bold fs-5 text-success">Rs {{ total_collected|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">Outstanding</div>
+                    <div class="fw-bold fs-5 text-danger">Rs {{ total_outstanding|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">Collection Rate</div>
+                    <div class="fw-bold fs-5 text-primary">{{ collection_rate }}%</div>
+                    <div class="progress mt-1" style="height:6px;border-radius:6px;">
+                        <div class="progress-bar bg-success"
+                             style="width: {{ collection_rate }}%;border-radius:6px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 
-    <div class="container my-5">
-    <h4>Student Distribution Chart</h4>
-    <div>
-        {{ plot_div|safe }}
-    </div>
-</div>
+    {# ── Financial Cards ───────────────────────────────────────── #}
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-building me-2"></i> School Financials
+    </h6>
+    <div class="row g-3 mb-4">
 
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">
+                        <i class="fas fa-chalkboard-teacher me-1 text-warning"></i> Teacher Salaries
+                    </div>
+                    <div class="fw-bold">Rs {{ teacher_salary|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">
+                        <i class="fas fa-user-tie me-1 text-info"></i> Staff Salaries
+                    </div>
+                    <div class="fw-bold">Rs {{ staff_salary|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">
+                        <i class="fas fa-receipt me-1 text-danger"></i> Expenses (Session)
+                    </div>
+                    <div class="fw-bold">Rs {{ total_expenses|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body text-center">
+                    <div class="small text-muted mb-1">
+                        <i class="fas fa-boxes-stacked me-1 text-secondary"></i> Assets (Session)
+                    </div>
+                    <div class="fw-bold">Rs {{ total_assets|floatformat:0 }}</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {# ── Class/Section Breakdown + Chart ──────────────────────── #}
+    <div class="row g-4">
+
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">
+                    <i class="fas fa-table-cells me-2"></i> Students by Class &amp; Section
+                </div>
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0 table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Class</th>
+                                <th>Section</th>
+                                <th class="text-end">Count</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in class_summary %}
+                            <tr>
+                                <td class="fw-semibold">{{ row.class_name }}</td>
+                                <td>{{ row.section }}</td>
+                                <td class="text-end">
+                                    <span class="badge bg-primary">{{ row.count }}</span>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="3" class="text-center text-muted py-3">
+                                    No students yet.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">
+                    <i class="fas fa-chart-bar me-2"></i> Student Distribution by Class
+                </div>
+                <div class="card-body p-2">
+                    {% if plot_div %}
+                        {{ plot_div|safe }}
+                    {% else %}
+                        <div class="text-center text-muted py-5">
+                            No data to display.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {% endif %}
 </div>
 {% endblock %}
 

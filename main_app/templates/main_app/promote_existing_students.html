@@ -20,6 +20,15 @@
         <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
     </div>
 
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+
     {% if no_previous %}
     <div class="alert alert-warning text-center py-5">
         <i class="fas fa-info-circle fa-3x mb-3 text-warning"></i>
@@ -30,12 +39,11 @@
     </div>
     {% else %}
 
-    <!-- Filter Form -->
+    {# ── Filter Form ─────────────────────────────────────────── #}
     <div class="card shadow-sm mb-4">
         <div class="card-body">
-            <form method="post" class="row g-3 align-items-end">
-                {% csrf_token %}
-                
+            <form method="get" class="row g-3 align-items-end">
+
                 <div class="col-md-4">
                     <label class="form-label">Class</label>
                     <select name="class_name" class="form-select">
@@ -71,10 +79,18 @@
     </div>
 
     {% if students %}
-    <!-- Bulk Promotion Form -->
+    {# ── Bulk Not-Promote Form ──────────────────────────────────
+       Note: Bulk "Promote" is intentionally not offered here.
+       Promotion requires per-student fee review (discount, transport,
+       roll number) via the individual Promote form — bulk-promoting
+       would skip that review and risk incorrect fee data. Use the
+       per-row "Promote" link for that.
+       ──────────────────────────────────────────────────────────── #}
     <form method="post" id="bulkPromoteForm">
         {% csrf_token %}
-        <input type="hidden" name="action" id="bulk_action" value="">
+        <input type="hidden" name="action" value="not_promote">
+        <input type="hidden" name="class_name" value="{{ selected_class_name }}">
+        <input type="hidden" name="section" value="{{ selected_section }}">
 
         <div class="card shadow-sm">
             <div class="card-header bg-light d-flex justify-content-between align-items-center">
@@ -83,11 +99,8 @@
                     (<span id="selectedCount">0</span> selected)
                 </h5>
                 <div>
-                    <button type="button" class="btn btn-success btn-sm" onclick="bulkAction('promote')">
-                        <i class="fas fa-arrow-up"></i> Promote Selected
-                    </button>
-                    <button type="button" class="btn btn-danger btn-sm" onclick="bulkAction('not_promote')">
-                        <i class="fas fa-arrow-down"></i> Not Promote Selected
+                    <button type="button" class="btn btn-danger btn-sm" onclick="bulkNotPromote()">
+                        <i class="fas fa-arrow-down"></i> Mark Selected as Not Promoted
                     </button>
                 </div>
             </div>
@@ -103,16 +116,15 @@
                             <th>Name</th>
                             <th>Roll Number</th>
                             <th>Pending Balance</th>
-                            <th>Status</th>
-                            <th style="width: 180px;">Actions</th>
+                            <th style="width: 200px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for student in students %}
                         <tr>
                             <td>
-                                <input type="checkbox" name="student_ids" 
-                                       value="{{ student.student.student_id }}" 
+                                <input type="checkbox" name="student_ids"
+                                       value="{{ student.student.student_id }}"
                                        class="student-checkbox">
                             </td>
                             <td class="fw-semibold">{{ student.student.student_id }}</td>
@@ -124,21 +136,10 @@
                                 </strong>
                             </td>
                             <td>
-                                {% if student.promoted %}
-                                    <span class="badge bg-success">Promoted</span>
-                                {% else %}
-                                    <span class="badge bg-warning">Pending</span>
-                                {% endif %}
-                            </td>
-                            <td>
-                                {% if not student.promoted and student.student.student_id not in admitted_student_ids %}
-                                    <a href="{% url 'promote_existing_student' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
-                                       class="btn btn-sm btn-outline-success me-1">Promote</a>
-                                    <a href="{% url 'mark_not_promoted' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
-                                       class="btn btn-sm btn-outline-danger">Not Promote</a>
-                                {% else %}
-                                    <span class="text-muted">No actions</span>
-                                {% endif %}
+                                <a href="{% url 'promote_existing_student' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
+                                   class="btn btn-sm btn-outline-success me-1">Promote</a>
+                                <a href="{% url 'mark_not_promoted' student.student.student_id %}?class_name={{ selected_class_name|urlencode }}&section={{ selected_section|urlencode }}"
+                                   class="btn btn-sm btn-outline-danger">Not Promote</a>
                             </td>
                         </tr>
                         {% endfor %}
@@ -160,34 +161,36 @@
 
 {% block extra_js %}
 <script>
-    $(document).ready(function () {
-        $('#selectAll').on('change', function () {
-            $('.student-checkbox').prop('checked', this.checked);
-            updateSelectedCount();
-        });
+    document.addEventListener('DOMContentLoaded', function () {
+        var selectAll  = document.getElementById('selectAll');
+        var checkboxes = document.querySelectorAll('.student-checkbox');
+        var countEl    = document.getElementById('selectedCount');
 
-        $('.student-checkbox').on('change', updateSelectedCount);
-
-        function updateSelectedCount() {
-            const count = $('.student-checkbox:checked').length;
-            $('#selectedCount').text(count);
+        function updateCount() {
+            var checked = document.querySelectorAll('.student-checkbox:checked').length;
+            if (countEl) countEl.textContent = checked;
         }
+
+        if (selectAll) {
+            selectAll.addEventListener('change', function () {
+                checkboxes.forEach(function (cb) { cb.checked = selectAll.checked; });
+                updateCount();
+            });
+        }
+
+        checkboxes.forEach(function (cb) {
+            cb.addEventListener('change', updateCount);
+        });
     });
 
-    function bulkAction(action) {
-        const selected = $('.student-checkbox:checked').length;
+    function bulkNotPromote() {
+        var selected = document.querySelectorAll('.student-checkbox:checked').length;
         if (selected === 0) {
             alert("Please select at least one student.");
             return;
         }
-
-        const message = action === 'promote'
-            ? `Promote ${selected} selected students?`
-            : `Mark ${selected} selected students as Not Promoted?`;
-
-        if (confirm(message)) {
-            $('#bulk_action').val(action);
-            $('#bulkPromoteForm').submit();
+        if (confirm("Mark " + selected + " selected student(s) as Not Promoted? This will repeat them in the same class for the new session.")) {
+            document.getElementById('bulkPromoteForm').submit();
         }
     }
 </script>

@@ -1,30 +1,57 @@
 {% extends 'main_app/base.html' %}
 {% load crispy_forms_tags %}
-{% load static %}
+
+{% block title %}{{ action }} Subject{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item">
+                <a href="{% url 'subject_list' %}{% if setup %}?setup=1{% endif %}">Subjects</a>
+            </li>
+            <li class="breadcrumb-item active">{{ action }} Subject</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="container mt-5">
-    <h2>{{ action }} Subject</h2>
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        {% endfor %}
+<div class="content-area">
+
+    {# ── Onboarding Step Indicator ────────────────────────────── #}
+    {% if setup %}
+        {% include 'main_app/partials/_onboarding_steps.html' with current_step=3 %}
     {% endif %}
-    <div class="card">
-        <div class="card-header">
-            <h5>{{ action }} Subject Form</h5>
-        </div>
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
-                {{ form|crispy }}
-                <button type="submit" class="btn btn-success">{{ action }} Subject</button>
-                <a href="{% url 'subject_list' %}" class="btn btn-secondary">Cancel</a>
-            </form>
+
+    <div class="row justify-content-center">
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-primary text-white fw-semibold">
+                    <i class="fas fa-book me-2"></i> {{ action }} Subject
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        {% if setup %}
+                            <input type="hidden" name="setup" value="1">
+                        {% endif %}
+                        {{ form|crispy }}
+                        <div class="d-flex gap-2 mt-3">
+                            <button type="submit" class="btn btn-success flex-grow-1">
+                                <i class="fas fa-save me-1"></i> {{ action }} Subject
+                            </button>
+                            <a href="{% url 'subject_list' %}{% if setup %}?setup=1{% endif %}"
+                               class="btn btn-outline-secondary">
+                                Cancel
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
         </div>
     </div>
+
 </div>
 {% endblock %}

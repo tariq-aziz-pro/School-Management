@@ -19,6 +19,13 @@ from ..forms import StudentUserForm, StudentAdmissionForm, EditStudentForm
 from ..models import CustomUser, AcademicSession, StudentAdmission, MonthlyFee, Student, Subject, Teacher, StudentResult, Syllabus, Announcement, Events, TemporaryPassword
 from ..permissions import school_staff_required, student_required, get_active_session
 
+from ..utils import (
+    create_monthly_fees_for_student,
+    get_active_session,
+    get_pending_balance,
+    recalculate_monthly_chain,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -248,52 +255,66 @@ def student_dashboard(request):
 def student_admission(request):
     active_session = get_active_session(request)
     if not active_session:
-        messages.error(request, "No active session found. Please create an active session first.")
+        messages.error(request, "No active session found. Please create one first.")
         return redirect('dashboard')
-
+ 
     if request.method == 'POST':
         form = StudentAdmissionForm(request.POST, request.FILES, request=request)
-
+ 
         if form.is_valid():
             try:
                 with transaction.atomic():
+                    # 1. Create the core Student record
                     student = Student.objects.create(
-                        school=request.user.school,
-                        first_name=form.cleaned_data['first_name'],
-                        last_name=form.cleaned_data['last_name'],
-                        father_guardian_name=form.cleaned_data['father_guardian_name'],
-                        contact=form.cleaned_data['contact'],
-                        date_of_birth=form.cleaned_data['date_of_birth'],
-                        gender=form.cleaned_data['gender'],
-                        image=form.cleaned_data.get('image')
+                        school               = request.user.school,
+                        first_name           = form.cleaned_data['first_name'],
+                        last_name            = form.cleaned_data['last_name'],
+                        father_guardian_name = form.cleaned_data['father_guardian_name'],
+                        contact              = form.cleaned_data['contact'],
+                        date_of_birth        = form.cleaned_data['date_of_birth'],
+                        gender               = form.cleaned_data['gender'],
+                        image                = form.cleaned_data.get('image'),
                     )
-
+ 
+                    # 2. Create the StudentAdmission record
                     admission = form.save(commit=False)
-                    admission.student = student
+                    admission.student         = student
                     admission.academic_session = active_session
-                    admission.operator = request.user
-                    admission.admission_date = datetime.date.today()
-                    admission.status = True
-                    admission.admission_fee = admission.admission_fee or Decimal('0.00')
-                    admission.total_dues = admission.total_dues or Decimal('0.00')
-                    admission.balance = admission.balance or Decimal('0.00')
+                    admission.operator        = request.user
+                    admission.admission_date  = datetime.date.today()
+                    admission.status          = True
+ 
+                    # Ensure derived fields are correct before first save
+                    admission.previous_balance = Decimal('0.00')   # new student
+                    admission.closing_balance  = admission.balance  # placeholder
                     admission.save()
-
-                messages.success(request, f"Student {student.first_name} {student.last_name} admitted successfully!")
+ 
+                    # 3. Pre-generate all MonthlyFee records (May → March)
+                    #    and calculate their full chain immediately.
+                    create_monthly_fees_for_student(admission)
+ 
+                messages.success(
+                    request,
+                    f"Student {student.first_name} {student.last_name} admitted successfully!"
+                )
                 return redirect('admission_success', student_id=student.student_id)
-            except Exception as e:
-                logger.error(f"Admission error: {e}")
-                messages.error(request, f"Failed to save: {str(e)}")
+ 
+            except Exception as exc:
+                logger.error("Admission error: %s", exc, exc_info=True)
+                messages.error(request, f"Failed to save admission: {exc}")
         else:
             messages.error(request, "Please correct the errors below.")
             for field, errors in form.errors.items():
                 for error in errors:
-                    messages.error(request, f"{field.replace('_', ' ').title()}: {error}")
+                    messages.error(
+                        request,
+                        f"{field.replace('_', ' ').title()}: {error}"
+                    )
     else:
         form = StudentAdmissionForm(request=request)
-
+ 
     return render(request, 'main_app/admission_form.html', {
-        'form': form,
+        'form':          form,
         'operator_name': request.user.username,
     })
 

@@ -1,68 +1,112 @@
-{% extends "main_app/base.html" %}
+{% extends 'main_app/base.html' %}
+
+{% block title %}Session Analytics{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'analytics' %}">Analytics</a></li>
+            <li class="breadcrumb-item active">Session Analytics</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h2>📊 Session Analysis</h2>
-    <hr>
+<div class="content-area">
 
-    {% if session_data %}
-        <!-- Table -->
-        <div class="table-responsive mt-3">
-            <table class="table table-bordered table-hover">
-                <thead class="table-dark">
+    <h4 class="fw-bold mb-4">Session-by-Session Analytics</h4>
+
+    {# ── Session comparison table ──────────────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-light fw-semibold">
+            <i class="fas fa-table me-2"></i> Session Comparison
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 table-sm align-middle">
+                <thead class="table-light">
                     <tr>
                         <th>Session</th>
-                        <th>Students</th>
-                        <th>Fees Collected</th>
-                        <th>Teacher Salaries</th>
-                        <th>Staff Salaries</th>
-                        <th>Expenses</th>
-                        <th>Assets</th>
+                        <th class="text-end">Students</th>
+                        <th class="text-end">Fee Collected</th>
+                        <th class="text-end">Outstanding</th>
+                        <th class="text-end">Teacher Salaries</th>
+                        <th class="text-end">Staff Salaries</th>
+                        <th class="text-end">Expenses</th>
+                        <th class="text-end">Assets</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in session_data %}
                     <tr>
-                        <td>
-                            {{ row.session }}
-                            {% if sessions|length > 0 and sessions.0.session_name == row.session and sessions.0.is_active %}
-                                <span class="badge bg-success">Active</span>
-                            {% endif %}
-                        </td>
-                        <td>{{ row.students }}</td>
-                        <td>Rs. {{ row.fee_collected }}</td>
-                        <td>Rs. {{ row.teacher_salaries }}</td>
-                        <td>Rs. {{ row.staff_salaries }}</td>
-                        <td>Rs. {{ row.expenses }}</td>
-                        <td>Rs. {{ row.assets }}</td>
+                        <td class="fw-semibold">{{ row.session }}</td>
+                        <td class="text-end">{{ row.students }}</td>
+                        <td class="text-end text-success">Rs {{ row.fee_collected|floatformat:0 }}</td>
+                        <td class="text-end text-danger">Rs {{ row.balance|floatformat:0 }}</td>
+                        <td class="text-end">Rs {{ row.teacher_salaries|floatformat:0 }}</td>
+                        <td class="text-end">Rs {{ row.staff_salaries|floatformat:0 }}</td>
+                        <td class="text-end">Rs {{ row.expenses|floatformat:0 }}</td>
+                        <td class="text-end">Rs {{ row.assets|floatformat:0 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">No session data available.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
+    </div>
 
-        <!-- Charts -->
-        <div class="row mt-4">
-            <div class="col-md-6">
-                <h4>Financial Metrics Comparison</h4>
-                {{ bar_chart|safe }}
-            </div>
-            <div class="col-md-6">
-                <h4>Session Proportions</h4>
-                {% for session_name, pie_chart in pie_charts.items %}
-                    <div class="mb-4">
-                        <h5>{{ session_name }}</h5>
-                        {{ pie_chart|safe }}
-                    </div>
-                {% empty %}
-                    <p>No pie charts available.</p>
-                {% endfor %}
+    {# ── Charts ────────────────────────────────────────────────── #}
+    <div class="row g-4 mb-4">
+
+        {% if bar_chart %}
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light fw-semibold">
+                    <i class="fas fa-chart-bar me-2 text-primary"></i>
+                    Financial Metrics Across Sessions
+                </div>
+                <div class="card-body p-2">{{ bar_chart|safe }}</div>
             </div>
         </div>
-    {% else %}
-        <div class="alert alert-info">No academic sessions found for this school.</div>
+        {% endif %}
+
+        {% if student_trend %}
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">
+                    <i class="fas fa-chart-line me-2 text-success"></i>
+                    Student Enrollment Trend
+                </div>
+                <div class="card-body p-2">{{ student_trend|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    {# ── Per-session pie charts ────────────────────────────────── #}
+    {% if pie_charts %}
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-chart-pie me-2"></i> Financial Proportions per Session
+    </h6>
+    <div class="row g-4">
+        {% for session_name, chart_html in pie_charts.items %}
+        <div class="col-md-6 col-xl-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">
+                    {{ session_name }}
+                </div>
+                <div class="card-body p-2">{{ chart_html|safe }}</div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
     {% endif %}
 
-    <a href="{% url 'dashboard' %}" class="btn btn-primary mt-3">Back to Dashboard</a>
 </div>
 {% endblock %}

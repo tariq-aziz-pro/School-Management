@@ -1,70 +1,161 @@
 {% extends 'main_app/base.html' %}
-{% load static %}
+
 {% block title %}{{ page_title }}{% endblock %}
 
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">{{ page_title }}</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
 {% block content %}
-<div class="container mt-5">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="mb-0">{{ page_title }}</h2>
-        
+<div class="content-area">
+
+    {# ── Onboarding Step Indicator ────────────────────────────── #}
+    {% if setup %}
+        {% include 'main_app/partials/_onboarding_steps.html' with current_step=3 %}
+
+        {# Wizard completion card #}
+        <div class="alert border-0 shadow-sm mb-4"
+             style="background: #e8f5e9; border-left: 4px solid #43a047 !important;">
+            <div class="d-flex align-items-start gap-3">
+                <i class="fas fa-check-circle text-success mt-1 fa-lg"></i>
+                <div>
+                    <div class="fw-semibold text-success">Almost there!</div>
+                    <div class="small text-muted">
+                        Add the subjects your school teaches. Teachers will be able to assign
+                        themselves to these subjects. Once done, your school is ready to go.
+                    </div>
+                    <a href="{% url 'dashboard' %}" class="btn btn-success btn-sm mt-2">
+                        <i class="fas fa-check me-1"></i> Finish Setup → Go to Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+
+    {# ── Header ───────────────────────────────────────────────── #}
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0">{{ page_title }}</h4>
         {% if not is_teacher %}
-        <a href="{% url 'subject_create' %}" class="btn btn-success">
-            <i class="fas fa-plus-circle"></i> Add New Subject
+        <a href="{% url 'subject_create' %}{% if setup %}?setup=1{% endif %}"
+           class="btn btn-primary">
+            <i class="fas fa-plus-circle me-2"></i> Add New Subject
         </a>
         {% endif %}
     </div>
 
-    <div class="card shadow">
-        <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">{{ page_title }}</h5>
+    {# ── Subject Cards / Table ────────────────────────────────── #}
+    {% if subjects %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-light fw-semibold d-flex justify-content-between align-items-center">
+            <span><i class="fas fa-book me-2"></i> Subjects</span>
+            <span class="badge bg-primary">{{ subjects|length }}</span>
         </div>
-        <div class="card-body p-0">
-            <table class="table table-hover mb-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th>#</th>
+                        <th style="width:50px;">#</th>
                         <th>Subject Name</th>
                         <th>Assigned Teacher(s)</th>
                         {% if not is_teacher %}
-                        <th>Actions</th>
+                        <th style="width:120px;"></th>
                         {% endif %}
                     </tr>
                 </thead>
                 <tbody>
                     {% for subject in subjects %}
                     <tr>
-                        <td>{{ forloop.counter }}</td>
-                        <td><strong>{{ subject.name }}</strong></td>
+                        <td class="text-muted">{{ forloop.counter }}</td>
+                        <td>
+                            <div class="fw-semibold">{{ subject.name }}</div>
+                        </td>
                         <td>
                             {% if subject.teacher_set.all %}
                                 {% for teacher in subject.teacher_set.all %}
-                                    <span class="badge bg-info me-1">{{ teacher.name }}</span>
+                                    <span class="badge bg-info-subtle text-info border me-1">
+                                        {{ teacher.name }}
+                                    </span>
                                 {% endfor %}
                             {% else %}
-                                <span class="text-muted">Not Assigned</span>
+                                <span class="text-muted small">Not assigned</span>
                             {% endif %}
                         </td>
                         {% if not is_teacher %}
                         <td>
-                            <a href="{% url 'subject_edit' subject.id %}" class="btn btn-sm btn-warning me-1">
+                            <a href="{% url 'subject_edit' subject.id %}"
+                               class="btn btn-sm btn-outline-primary me-1">
                                 <i class="fas fa-edit"></i>
                             </a>
-                            <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteModal{{ subject.id }}">
+                            <button class="btn btn-sm btn-outline-danger"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#deleteModal{{ subject.id }}">
                                 <i class="fas fa-trash-alt"></i>
                             </button>
+
+                            {# Delete confirmation modal #}
+                            <div class="modal fade" id="deleteModal{{ subject.id }}"
+                                 tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog modal-sm modal-dialog-centered">
+                                    <div class="modal-content border-0 shadow">
+                                        <div class="modal-header border-0 pb-0">
+                                            <h6 class="modal-title fw-bold text-danger">
+                                                <i class="fas fa-trash-alt me-2"></i>Delete Subject
+                                            </h6>
+                                            <button type="button" class="btn-close"
+                                                    data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <p class="small mb-0">
+                                                Delete <strong>{{ subject.name }}</strong>?
+                                                This cannot be undone and will remove it from
+                                                all timetable slots and results.
+                                            </p>
+                                        </div>
+                                        <div class="modal-footer border-0 pt-0">
+                                            <button type="button" class="btn btn-sm btn-secondary"
+                                                    data-bs-dismiss="modal">Cancel</button>
+                                            <form method="post"
+                                                  action="{% url 'subject_delete' subject.id %}">
+                                                {% csrf_token %}
+                                                <button type="submit" class="btn btn-sm btn-danger">
+                                                    Delete
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                         {% endif %}
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="{% if is_teacher %}3{% else %}4{% endif %}" class="text-center py-5 text-muted">
-                            No subjects found.
-                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+
+    {% else %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5 text-muted">
+            <i class="fas fa-book-open fa-3x mb-3 opacity-25"></i>
+            <div class="fw-semibold mb-1">No subjects yet</div>
+            {% if not is_teacher %}
+            <div class="small mb-3">Add the subjects your school teaches.</div>
+            <a href="{% url 'subject_create' %}{% if setup %}?setup=1{% endif %}"
+               class="btn btn-primary btn-sm">
+                <i class="fas fa-plus me-1"></i> Add First Subject
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
 </div>
 {% endblock %}

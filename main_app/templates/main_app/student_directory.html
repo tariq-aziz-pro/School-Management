@@ -1,0 +1,192 @@
+{% extends 'main_app/base.html' %}
+
+{% block title %}Student Directory{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Student Directory</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="content-area">
+    <h4 class="fw-bold mb-4">Student Directory</h4>
+
+    {% if no_active_session %}
+    <div class="alert alert-warning text-center py-5">
+        <i class="fas fa-info-circle fa-3x mb-3 text-warning"></i>
+        <h5>No Active Session Found</h5>
+        <p>Please create or activate an academic session first.</p>
+        <a href="{% url 'dashboard' %}" class="btn btn-primary mt-2">Go to Dashboard</a>
+    </div>
+    {% else %}
+
+    {# ── Top Summary Bar ────────────────────────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-md-3">
+                    <div class="p-3 rounded bg-primary-subtle text-center">
+                        <div class="small text-muted">Session</div>
+                        <div class="fw-bold text-primary">{{ active_session.session_name }}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="p-3 rounded bg-info-subtle text-center">
+                        <div class="small text-muted">Total Students</div>
+                        <div class="fw-bold text-info">{{ total_students }}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="p-3 rounded bg-danger-subtle text-center">
+                        <div class="small text-muted">Total Outstanding</div>
+                        <div class="fw-bold text-danger">Rs {{ total_outstanding|floatformat:2 }}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="p-3 rounded bg-secondary-subtle text-center">
+                        <div class="small text-muted">Classes</div>
+                        <div class="fw-bold text-secondary">{{ class_choices|length }}</div>
+                    </div>
+                </div>
+            </div>
+
+            {# Per class/section breakdown #}
+            <div class="d-flex flex-wrap gap-2">
+                {% for c in class_section_counts %}
+                <span class="badge bg-light text-dark border px-3 py-2">
+                    {{ c.class_name }} - {{ c.section }}: <strong>{{ c.count }}</strong>
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {# ── Filter Bar ─────────────────────────────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+
+                <div class="col-md-2">
+                    <label class="form-label small">Class</label>
+                    <select name="class_name" class="form-select">
+                        <option value="">All Classes</option>
+                        {% for c in class_choices %}
+                        <option value="{{ c }}" {% if c == filter_class %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label small">Section</label>
+                    <select name="section" class="form-select">
+                        <option value="">All Sections</option>
+                        {% for s in section_choices %}
+                        <option value="{{ s }}" {% if s == filter_section %}selected{% endif %}>{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label small">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="">All Statuses</option>
+                        <option value="new" {% if filter_status == 'new' %}selected{% endif %}>New Admission</option>
+                        <option value="promoted" {% if filter_status == 'promoted' %}selected{% endif %}>Promoted</option>
+                        <option value="not_promoted" {% if filter_status == 'not_promoted' %}selected{% endif %}>Not Promoted</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4">
+                    <label class="form-label small">Search (name, ID, father, contact)</label>
+                    <input type="text" name="search" class="form-control" value="{{ search_query }}" placeholder="Search students...">
+                </div>
+
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-filter me-1"></i> Filter
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {# ── Student Table ──────────────────────────────────────────── #}
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Student ID</th>
+                        <th>Name</th>
+                        <th>Class</th>
+                        <th>Section</th>
+                        <th>Roll</th>
+                        <th>Status</th>
+                        <th>Contact</th>
+                        <th>Outstanding</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for admission in page_obj %}
+                    <tr>
+                        <td class="fw-semibold">{{ admission.student.student_id }}</td>
+                        <td>{{ admission.student.first_name }} {{ admission.student.last_name }}</td>
+                        <td>{{ admission.class_name }}</td>
+                        <td>{{ admission.section }}</td>
+                        <td>{{ admission.roll_number }}</td>
+                        <td>
+                            <span class="badge bg-{{ admission.status_badge }}">{{ admission.status_label }}</span>
+                        </td>
+                        <td>{{ admission.student.contact }}</td>
+                        <td>
+                            <span class="{% if admission.outstanding > 0 %}text-danger{% else %}text-success{% endif %} fw-semibold">
+                                Rs {{ admission.outstanding|floatformat:2 }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{% url 'student_profile' admission.student.student_id %}" class="btn btn-sm btn-outline-primary">
+                                View Profile
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted py-4">No students found matching these filters.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── Pagination ─────────────────────────────────────────────── #}
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Previous</a>
+            </li>
+            {% endif %}
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}

@@ -5,15 +5,18 @@
     background-color: #121212;
     color: #e9ecef;
 }
+
 [data-bs-theme="dark"] .sidebar {
     background: #0d1421;
     color: rgba(255, 255, 255, 0.88);
 }
+
 [data-bs-theme="dark"] .card {
     background-color: #1e1e1e;
     border-color: #2d2d2d;
     color: #e9ecef;
 }
+
 [data-bs-theme="dark"] .text-muted {
     color: #adb5bd !important;
 }
@@ -40,7 +43,16 @@
 }
 
 /* Fix stacked text issue */
-h1, h2, h3, h4, h5, .display-4, .display-3, .h1, .h2, .h3 {
+h1,
+h2,
+h3,
+h4,
+h5,
+.display-4,
+.display-3,
+.h1,
+.h2,
+.h3 {
     writing-mode: horizontal-tb !important;
     text-orientation: mixed !important;
 }
@@ -48,6 +60,41 @@ h1, h2, h3, h4, h5, .display-4, .display-3, .h1, .h2, .h3 {
 /* Messages */
 .app-message-stack .app-dismissible-msg {
     word-break: break-word;
+}
+
+.step-circle {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+}
+
+.step-done {
+    background: #4caf50;
+    color: white;
+}
+
+.step-current {
+    background: white;
+    color: #1565c0;
+}
+
+.step-pending {
+    background: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.step-line {
+    height: 2px;
+    min-width: 30px;
+    max-width: 80px;
+}
+
+.step-line-active {
+    background: rgba(255, 255, 255, 0.8);
+}
+
+.step-line-pending {
+    background: rgba(255, 255, 255, 0.3);
 }
 
 /* Sidebar Backdrop */
@@ -58,6 +105,7 @@ h1, h2, h3, h4, h5, .display-4, .display-3, .h1, .h2, .h3 {
     background: rgba(0, 0, 0, 0.45);
     z-index: 1035;
 }
+
 .sidebar-backdrop.show {
     display: block;
 }

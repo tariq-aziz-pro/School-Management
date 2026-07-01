@@ -21,10 +21,17 @@ urlpatterns = [
     # ─── Dashboard ────────────────────────────────────────────────────────────
     path('dashboard/', views.dashboard, name='dashboard'),
 
+    path('students/directory/', views.student_directory, name='student_directory'),
+    path('students/profile/<str:student_id>/', views.student_profile, name='student_profile'),
+
     # ─── Academic Session ─────────────────────────────────────────────────────
     path('session/create/', views.create_academic_session, name='create_session'),
     path('session/search/', views.search_session, name='search_session'),
     path('session-analytics/', views.session_analytics, name='session_analytics'),
+
+    path('timetable/', views.timetable_view, name='timetable_view'),
+    path('timetable/save/', views.timetable_save, name='timetable_save'),
+    path('timetable/periods/', views.period_manage, name='period_manage'),
 
     # ─── Fee Structure ────────────────────────────────────────────────────────
     path('add-fee-structure/', views.add_fee_structure, name='add_fee_structure'),
@@ -51,16 +58,14 @@ urlpatterns = [
 
     # ─── Promotion ────────────────────────────────────────────────────────────
     # ✅ specific paths before generic <str:student_id> to avoid shadowing
-    path('promote-offline/', views.promote_offline_student, name='promote_offline_student'),
-    path('promote-offline/preview/', views.promote_offline_preview, name='promote_offline_preview'),
-    path('promote-offline/success/<str:student_id>/', views.promote_offline_success, name='promote_offline_success'),  # ✅ fixed int: → str:
+
     path('promoted-students-report/', views.promoted_students_report, name='promoted_students_report'),
 
     path('promote-existing/', views.promote_existing_students, name='promote_existing_students'),
     path('promote-existing/success/<str:student_id>/', views.promote_existing_success, name='promote_existing_success'),  # ✅ moved above generic pattern
     path('promote-existing/<str:student_id>/', views.promote_existing_student, name='promote_existing_student'),
     path('mark-not-promoted/<str:student_id>/', views.mark_not_promoted, name='mark_not_promoted'),
-    path('roll-number-prompt/<str:student_id>/', views.roll_number_prompt, name='roll_number_prompt'),
+   
 
     # ─── Teachers ─────────────────────────────────────────────────────────────
     path('teachers/', views.teacher_list, name='teacher_list'),

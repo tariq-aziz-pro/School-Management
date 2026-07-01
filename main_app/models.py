@@ -89,6 +89,11 @@ class School(TimestampedModel):
         CustomUser, on_delete=models.CASCADE,
         related_name='school_admin', limit_choices_to={'user_type': 1}
     )
+
+    open_time  = models.TimeField(null=True, blank=True,
+                      help_text="School opening time (e.g. 08:00)")
+    close_time = models.TimeField(null=True, blank=True,
+                      help_text="School closing time (e.g. 14:00)")
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -128,6 +133,84 @@ class SchoolSubscription(TimestampedModel):
 
     def __str__(self):
         return f"{self.school.school_name} - {self.payment_type} ({self.payment_date})"
+    
+
+
+
+# ── 2. Period model ───────────────────────────────────────────
+ 
+class Period(TimestampedModel):
+    """
+    A school-wide time slot definition.
+    Created once per school and reused across all class/section timetables.
+ 
+    Examples:
+        order=1  name="Period 1"  start=08:00  end=08:45
+        order=2  name="Break"     start=08:45  end=09:00
+        order=3  name="Period 2"  start=09:00  end=09:45
+    """
+    school      = models.ForeignKey(School, on_delete=models.CASCADE, related_name='periods')
+    name        = models.CharField(max_length=50)          # e.g. "Period 1", "Break"
+    start_time  = models.TimeField()
+    end_time    = models.TimeField()
+    order       = models.PositiveSmallIntegerField(default=1)  # controls grid row order
+    is_break    = models.BooleanField(default=False,
+                      help_text="Mark as a break — no subject/teacher required.")
+ 
+    class Meta:
+        unique_together = ('school', 'name')
+        ordering = ['order']
+        verbose_name = "Period"
+        verbose_name_plural = "Periods"
+ 
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValidationError("End time must be after start time.")
+ 
+    def __str__(self):
+        return f"{self.name} ({self.start_time.strftime('%H:%M')}–{self.end_time.strftime('%H:%M')})"
+ 
+ 
+# ── 3. Timetable model ────────────────────────────────────────
+ 
+class Timetable(TimestampedModel):
+    """
+    One slot in a class/section's timetable.
+ 
+    unique_together ensures each period in a class/section has at most
+    one subject+teacher assignment per session.
+ 
+    For break periods (Period.is_break=True), subject and teacher are
+    left NULL — the grid template handles display accordingly.
+    """
+    school            = models.ForeignKey(School, on_delete=models.CASCADE, related_name='timetables')
+    academic_session  = models.ForeignKey('AcademicSession', on_delete=models.CASCADE, related_name='timetables')
+    class_name        = models.CharField(max_length=20, choices=CLASS_CHOICES)
+    section           = models.CharField(max_length=10, choices=SECTION_CHOICES)
+    period            = models.ForeignKey('Period', on_delete=models.CASCADE, related_name='timetable_slots')
+    subject           = models.ForeignKey('Subject', on_delete=models.SET_NULL,
+                            null=True, blank=True, related_name='timetable_slots')
+    teacher           = models.ForeignKey('Teacher', on_delete=models.SET_NULL,
+                            null=True, blank=True, related_name='timetable_slots')
+    operator          = models.ForeignKey('CustomUser', on_delete=models.SET_NULL,
+                            null=True, blank=True)
+ 
+    class Meta:
+        unique_together = ('school', 'academic_session', 'class_name', 'section', 'period')
+        indexes = [
+            models.Index(fields=['school', 'academic_session', 'class_name', 'section']),
+            models.Index(fields=['teacher', 'academic_session']),
+        ]
+        verbose_name = "Timetable Slot"
+        verbose_name_plural = "Timetable Slots"
+ 
+    def __str__(self):
+        return (
+            f"{self.class_name} {self.section} | {self.period.name} | "
+            f"{self.subject.name if self.subject else 'Break'}"
+        )
+
 
 
 # ====================== ACADEMIC SESSION ======================
@@ -309,6 +392,16 @@ class StudentAdmission(TimestampedModel):
 
         super().save(*args, **kwargs)
 
+    def update_closing_balance(self):
+        """Call this after any MonthlyFee change"""
+        latest_fee = self.monthly_fees.order_by('-year', '-id').first()
+        if latest_fee:
+            self.closing_balance = latest_fee.current_balance
+        else:
+            self.closing_balance = self.balance or Decimal('0.00')
+        self.save(update_fields=['closing_balance'])
+
+
     def get_pending_balance_for_promotion(self):
         #Delegate to utils for consistency
         from .utils import get_pending_balance
@@ -377,60 +470,67 @@ class StudentResult(TimestampedModel):
 
 
 # ====================== MONTHLY FEE ======================
+
 class MonthlyFee(TimestampedModel):
-    student_admission = models.ForeignKey(StudentAdmission, on_delete=models.CASCADE, related_name='monthly_fees')
-    month = models.CharField(max_length=20)
-    year = models.PositiveIntegerField()
-
-    previous_balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    monthly_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    """
+    One record per calendar month per student admission.
+ 
+    Design rules
+    ────────────
+    • monthly_fee and transport_fee are set ONCE at record creation
+      (from the fee structure / admission data) and never auto-mutated.
+    • previous_balance, total_dues, current_balance are ALWAYS derived
+      from the full chain via recalculate_monthly_chain(); they are
+      stored for fast reads but must never be trusted without a fresh
+      recalculation after any payment.
+    • has_payment is derived (received > 0) and kept in sync by the
+      recalculation helper.
+    • month_number (1-12) is added so ORDER BY year, month_number
+      is always correct for cross-year sessions (e.g. Apr 2026–Mar 2027).
+    """
+ 
+    student_admission = models.ForeignKey(
+        StudentAdmission,
+        on_delete=models.CASCADE,
+        related_name='monthly_fees',
+    )
+    month        = models.CharField(max_length=20)          # e.g. 'May'
+    month_number = models.PositiveSmallIntegerField()       # 1-12; NEW FIELD
+    year         = models.PositiveIntegerField()
+ 
+    # ── Fee components (set at creation, rarely changed) ──────
+    monthly_fee   = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     transport_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    total_dues = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    received = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-    current_balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
-
-    has_payment = models.BooleanField(default=False)
-    payment_date = models.DateField(default=timezone.now)
-    
-    reviewed_by = models.CharField(max_length=100, blank=True, null=True)
-    
-    operator = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True)
-
+ 
+    # ── Chain-derived fields (managed by recalculate_monthly_chain) ──
+    previous_balance = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    total_dues       = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    received         = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    current_balance  = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+ 
+    # ── Payment metadata ─────────────────────────────────────
+    has_payment  = models.BooleanField(default=False)
+    payment_date = models.DateField(null=True, blank=True)
+    reviewed_by  = models.CharField(max_length=100, blank=True, null=True)
+    operator     = models.ForeignKey(
+        CustomUser, on_delete=models.SET_NULL, null=True, blank=True
+    )
+ 
     class Meta:
         unique_together = (('student_admission', 'month', 'year'),)
         indexes = [
-            models.Index(fields=['student_admission', 'month', 'year']),
+            models.Index(fields=['student_admission', 'year', 'month_number']),
             models.Index(fields=['has_payment']),
         ]
-
-    def save(self, *args, **kwargs):
-        if self.monthly_fee == Decimal('0.00'):
-            self.monthly_fee = self.student_admission.tuition_fee - (self.student_admission.discount or Decimal('0.00'))
-
-        if self.transport_fee == Decimal('0.00') and self.student_admission.transport == 'Paid':
-            self.transport_fee = self.student_admission.transport_fee or Decimal('0.00')
-
-        self.total_dues = self.previous_balance + self.monthly_fee + self.transport_fee
-        self.current_balance = self.total_dues - (self.received or Decimal('0.00'))
-        self.has_payment = self.received > Decimal('0.00')
-
-        super().save(*args, **kwargs)
-
-        # Update closing balance of StudentAdmission
-        if self.student_admission:
-            latest = MonthlyFee.objects.filter(
-                student_admission=self.student_admission
-            ).order_by('-year', '-id').first()
-
-            if latest:
-                self.student_admission.closing_balance = latest.current_balance
-            else:
-                self.student_admission.closing_balance = self.student_admission.balance or Decimal('0.00')
-
-            self.student_admission.save(update_fields=['closing_balance'])
-
+ 
+    # ── No auto-calculation in save() ────────────────────────
+    # total_dues / previous_balance / current_balance are managed
+    # exclusively by recalculate_monthly_chain() in utils.py.
+    # This keeps the model a pure data store and avoids the
+    # "silent overwrite" bug that existed in the previous version.
+ 
     def __str__(self):
-        return f"{self.student_admission.student} - {self.month} {self.year}"
+        return f"{self.student_admission.student} — {self.month} {self.year}"
 
 
 # ====================== TEACHER & STAFF ======================

@@ -1,172 +1,382 @@
-{% extends 'main_app/analytics_base.html' %}
-{% load static %}
+{% extends 'main_app/base.html' %}
 
-{% block analytics_content %}
+{% block title %}Analytics{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Analytics</li>
+        </ol>
+    </nav>
+</div>
+{% endblock %}
+
+{% block content %}
 <div class="content-area">
-    
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h4 class="fw-bold mb-0">
-            <i class="fas fa-chart-line me-2 text-primary"></i> 
-            School Analytics & Insights
-        </h4>
+
+    <!-- ── Header ────────────────────────────────────────────────── -->
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <div>
+            <h4 class="fw-bold mb-0">Analytics &amp; Insights</h4>
+            <small class="text-muted">
+                Viewing: <strong>{% if selected_session %}{{ selected_session.session_name }}{% else %}No session{% endif %}</strong>
+            </small>
+        </div>
+        <a href="{% url 'statistics_view' %}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-chart-pie me-1"></i> Statistics
+        </a>
     </div>
 
-    <!-- Session Selector -->
-    <div class="card shadow-sm mb-4">
-        <div class="card-body">
-            <form method="get">
-                <div class="row align-items-end">
-                    <div class="col-md-5">
-                        <label class="form-label fw-semibold">Academic Session</label>
-                        <select name="session" class="form-select" onchange="this.form.submit()">
-                            {% for session in all_sessions %}
-                                <option value="{{ session.id }}"
-                                        {% if selected_session and session.id == selected_session.id %}selected{% endif %}>
-                                    {{ session.session_name }} 
-                                    ({{ session.start_date|date:"M Y" }})
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+    <!-- ── Session Selector ──────────────────────────────────────── -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body py-3">
+            <form method="get" class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Academic Session</label>
+                    <select name="session" class="form-select" onchange="this.form.submit()">
+                        {% for session in all_sessions %}
+                        <option value="{{ session.id }}"
+                                {% if selected_session and session.id == selected_session.id %}selected{% endif %}>
+                            {{ session.session_name }} ({{ session.start_date|date:"M Y" }})
+                        </option>
+                        {% endfor %}
+                    </select>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- ====================== PRE-BUILT INSIGHTS ====================== -->
-    <h5 class="mb-3 text-muted">📊 Key School Insights</h5>
-    <div class="row g-4">
-        
-        {% if pie_chart %}
-        <div class="col-lg-6">
-            <div class="card shadow-sm h-100">
-                <div class="card-header bg-light">
-                    <h5 class="mb-0">🎯 Student Distribution by Class</h5>
+    
+      <!-- SECTION A — SCHOOL PROGRESS SCORE -->
+      
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-gauge-high me-2"></i> Overall School Progress
+    </h6>
+    <div class="row g-4 mb-4">
+
+        {% if chart_progress_gauge %}
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">
+                    Progress Score — {{ selected_session.session_name }}
                 </div>
-                <div class="card-body p-4">
-                    {{ pie_chart|safe }}
+                <div class="card-body p-2">
+                    {{ chart_progress_gauge|safe }}
+                    {% if current_progress %}
+                    <div class="row g-2 text-center mt-2 px-2">
+                        <div class="col-3">
+                            <div class="small text-muted">Collection</div>
+                            <div class="fw-bold small">{{ current_progress.collection_rate }}%</div>
+                        </div>
+                        <div class="col-3">
+                            <div class="small text-muted">Retention</div>
+                            <div class="fw-bold small">{{ current_progress.retention_rate }}%</div>
+                        </div>
+                        <div class="col-3">
+                            <div class="small text-muted">Growth</div>
+                            <div class="fw-bold small">{{ current_progress.enrollment_growth }}%</div>
+                        </div>
+                        <div class="col-3">
+                            <div class="small text-muted">Pass Rate</div>
+                            <div class="fw-bold small">{{ current_progress.pass_rate }}%</div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
         {% endif %}
 
-        {% if bar_chart %}
-        <div class="col-lg-6">
-            <div class="card shadow-sm h-100">
-                <div class="card-header bg-light">
-                    <h5 class="mb-0">💰 Financial Overview</h5>
+        {% if chart_progress_trend %}
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold">
+                    <i class="fas fa-chart-line me-2 text-primary"></i>
+                    Progress Trend Across Sessions
                 </div>
-                <div class="card-body p-4">
-                    {{ bar_chart|safe }}
+                <div class="card-body p-2">{{ chart_progress_trend|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+       SECTION B — STUDENTS
+       ════════════════════════════════════════════════════════════ -->
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-users me-2"></i> Students
+    </h6>
+    <div class="row g-4 mb-4">
+
+        {% if chart_student_dist %}
+        <div class="col-lg-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Distribution by Class</div>
+                <div class="card-body p-2">{{ chart_student_dist|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_status %}
+        <div class="col-lg-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Admission Status</div>
+                <div class="card-body p-2">{{ chart_status|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_retention %}
+        <div class="col-lg-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Retention Rate</div>
+                <div class="card-body p-2">{{ chart_retention|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_funnel %}
+        <div class="col-lg-6 col-xl-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Class Progression Funnel</div>
+                <div class="card-body p-2">{{ chart_funnel|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+<!-- ════════════════════════════════════════════════════════════
+     #  SECTION C — FEES
+     #  ════════════════════════════════════════════════════════════ -->
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-hand-holding-usd me-2"></i> Fees
+    </h6>
+    <div class="row g-4 mb-4">
+
+        {% if chart_fee_trend %}
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">
+                    Monthly Fee — Billed vs Collected
+                </div>
+                <div class="card-body p-2">{{ chart_fee_trend|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_defaulters %}
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">
+                    Fee Defaulter Aging
+                </div>
+                <div class="card-body p-2">
+                    {{ chart_defaulters|safe }}
+                    {% if top_defaulters %}
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light">
+                                <tr><th>Student</th><th>Class</th><th class="text-end">Unpaid Months</th></tr>
+                            </thead>
+                            <tbody>
+                                {% for d in top_defaulters %}
+                                <tr>
+                                    <td class="small">
+                                        {{ d.student__first_name }} {{ d.student__last_name }}
+                                        <span class="text-muted">({{ d.student__student_id }})</span>
+                                    </td>
+                                    <td class="small">{{ d.class_name }} - {{ d.section }}</td>
+                                    <td class="text-end">
+                                        <span class="badge bg-{% if d.unpaid >= 3 %}danger{% elif d.unpaid == 2 %}warning text-dark{% else %}secondary{% endif %}">
+                                            {{ d.unpaid }}
+                                        </span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
         {% endif %}
 
-        {% if trend_chart %}
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════
+       SECTION D — FINANCIALS
+       ════════════════════════════════════════════════════════════ -->
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-money-bill-wave me-2"></i> Financials
+    </h6>
+    <div class="row g-4 mb-4">
+
+        {% if chart_rev_vs_cost %}
         <div class="col-12">
-            <div class="card shadow-sm">
-                <div class="card-header bg-light">
-                    <h5 class="mb-0">📈 Fee Collection Trend Over Time</h5>
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light fw-semibold small">
+                    Revenue vs Operational Cost (All Sessions)
                 </div>
-                <div class="card-body p-4">
-                    {{ trend_chart|safe }}
-                </div>
+                <div class="card-body p-2">{{ chart_rev_vs_cost|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_expense_cat %}
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Expense Categories</div>
+                <div class="card-body p-2">{{ chart_expense_cat|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if chart_expense_trend %}
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Expense Type Trend</div>
+                <div class="card-body p-2">{{ chart_expense_trend|safe }}</div>
             </div>
         </div>
         {% endif %}
 
     </div>
 
-    <!-- ====================== CUSTOM CHART GENERATOR (Moved to Bottom) ====================== -->
-    <div class="mt-5">
-        <div class="card shadow-sm">
-            <div class="card-header bg-primary text-white">
-                <h5 class="mb-0">
-                    <i class="fas fa-magic me-2"></i> Custom Chart Generator
-                </h5>
-            </div>
-            <div class="card-body p-4">
-                <form method="post" id="analytics-form">
-                    {% csrf_token %}
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            {{ form.model_name.label_tag }}
-                            {{ form.model_name }}
-                        </div>
-                        <div class="col-md-4">
-                            {{ form.x_axis.label_tag }}
-                            {{ form.x_axis }}
-                        </div>
-                        <div class="col-md-4">
-                            {{ form.y_axis.label_tag }}
-                            {{ form.y_axis }}
-                        </div>
-                    </div>
-                    
-                    <div class="row g-3 mt-3">
-                        <div class="col-md-4">
-                            {{ form.chart_type.label_tag }}
-                            {{ form.chart_type }}
-                        </div>
-                        <div class="col-md-4 d-flex align-items-end">
-                            <button type="submit" class="btn btn-primary px-5 py-2">
-                                <i class="fas fa-chart-bar me-2"></i> Generate Chart
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
+    <!-- ════════════════════════════════════════════════════════════
+       SECTION E — ACADEMICS
+       ════════════════════════════════════════════════════════════ -->
+    {% if chart_subject_heatmap or chart_grades %}
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-graduation-cap me-2"></i> Academics
+    </h6>
+    <div class="row g-4 mb-4">
 
-        <!-- Generated Custom Chart -->
-        {% if chart %}
-        <div class="card shadow-sm mt-4">
-            <div class="card-header bg-light">
-                <h5 class="mb-0">Your Generated Chart</h5>
-            </div>
-            <div class="card-body p-4 text-center">
-                {{ chart|safe }}
+        {% if chart_subject_heatmap %}
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">
+                    Subject Performance Heatmap (Avg %)
+                </div>
+                <div class="card-body p-2">{{ chart_subject_heatmap|safe }}</div>
             </div>
         </div>
         {% endif %}
+
+        {% if chart_grades %}
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-light fw-semibold small">Grade Distribution</div>
+                <div class="card-body p-2">{{ chart_grades|safe }}</div>
+            </div>
+        </div>
+        {% endif %}
+
     </div>
+    {% endif %}
+
+    <!-- ════════════════════════════════════════════════════════════
+       SECTION F — OPERATIONS
+       ════════════════════════════════════════════════════════════ -->
+    {% if chart_transport %}
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-bus me-2"></i> Operations
+    </h6>
+    <div class="row g-4 mb-4">
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light fw-semibold small">Transport Utilization</div>
+                <div class="card-body p-2">{{ chart_transport|safe }}</div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ════════════════════════════════════════════════════════════
+       CUSTOM CHART GENERATOR
+       ════════════════════════════════════════════════════════════ -->
+    <h6 class="fw-semibold text-muted text-uppercase mb-3">
+        <i class="fas fa-sliders me-2"></i> Custom Chart Generator
+    </h6>
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-primary text-white fw-semibold">
+            <i class="fas fa-magic me-2"></i> Build Your Own Chart
+        </div>
+        <div class="card-body">
+            <form method="post" id="analytics-form">
+                {% csrf_token %}
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Model</label>
+                        {{ form.model_name }}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">X Axis</label>
+                        {{ form.x_axis }}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Y Axis</label>
+                        {{ form.y_axis }}
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Chart Type</label>
+                        {{ form.chart_type }}
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary px-4 mt-3">
+                    <i class="fas fa-chart-bar me-2"></i> Generate Chart
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% if chart %}
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-light fw-semibold">Generated Chart</div>
+        <div class="card-body p-2">{{ chart|safe }}</div>
+    </div>
+    {% endif %}
 
 </div>
+{% endblock %}
 
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+{% block extra_js %}
 <script>
-$(document).ready(function() {
-    $('#id_model_name').change(function() {
-        const modelName = $(this).val();
-        const xSelect = $('#id_x_axis');
-        const ySelect = $('#id_y_axis');
-        
-        xSelect.html('<option value="">Loading...</option>');
-        ySelect.html('<option value="">Loading...</option>');
+document.addEventListener('DOMContentLoaded', function () {
+    var modelSelect = document.getElementById('id_model_name');
+    if (!modelSelect) return;
 
-        if (modelName) {
-            $.ajax({
-                url: "{% url 'get_model_fields' %}",
-                data: { model_name: modelName },
-                success: function(data) {
-                    xSelect.empty().append(new Option('Select X Axis', ''));
-                    ySelect.empty().append(new Option('Select Y Axis', ''));
-                    
-                    if (data.fields && data.fields.length > 0) {
-                        data.fields.forEach(function(field) {
-                            const label = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                            xSelect.append(new Option(label, field));
-                            ySelect.append(new Option(label, field));
-                        });
-                    }
-                },
-                error: function() {
-                    xSelect.html('<option value="">Error loading fields</option>');
-                    ySelect.html('<option value="">Error loading fields</option>');
-                }
-            });
+    modelSelect.addEventListener('change', function () {
+        var modelName = this.value;
+        var xSelect = document.getElementById('id_x_axis');
+        var ySelect = document.getElementById('id_y_axis');
+        xSelect.innerHTML = '<option value="">Loading...</option>';
+        ySelect.innerHTML = '<option value="">Loading...</option>';
+        if (!modelName) {
+            xSelect.innerHTML = '<option value="">Select X Axis</option>';
+            ySelect.innerHTML = '<option value="">Select Y Axis</option>';
+            return;
         }
+        fetch("{% url 'get_model_fields' %}?model_name=" + encodeURIComponent(modelName))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                xSelect.innerHTML = '<option value="">Select X Axis</option>';
+                ySelect.innerHTML = '<option value="">Select Y Axis</option>';
+                (data.fields || []).forEach(function (field) {
+                    var label = field.replace(/_/g, ' ').replace(/\b\w/g, function (l) { return l.toUpperCase(); });
+                    var opt = '<option value="' + field + '">' + label + '</option>';
+                    xSelect.insertAdjacentHTML('beforeend', opt);
+                    ySelect.insertAdjacentHTML('beforeend', opt);
+                });
+            })
+            .catch(function () {
+                xSelect.innerHTML = '<option value="">Error loading fields</option>';
+                ySelect.innerHTML = '<option value="">Error loading fields</option>';
+            });
     });
 });
 </script>

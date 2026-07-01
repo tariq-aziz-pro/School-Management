@@ -1,22 +1,19 @@
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth import authenticate, login
+
 from django.contrib import messages
 
-from django.utils.encoding import force_bytes, force_str
 from django.db import transaction
+from django.core.paginator import Paginator
 
-
-from django.template.loader import render_to_string
 from django.conf import settings
-from .forms import SchoolRegisterForm, AcademicSessionForm, FeeStructureForm, StudentAdmissionForm, MonthlyFeeForm, PromoteOfflineStudentForm, PromoteExistingStudentForm, MarkNotPromotedForm, EditStudentForm, RollNumberPromptForm, SchoolSubscriptionForm, TeacherForm, StudentResultForm, SubjectForm, StudentUserForm, SyllabusForm, StaffForm, AssetsForm,ExpensesForm, TransportForm, EventsForm, AnalyticsForm
-
-from .models import CustomUser, AcademicSession, FeeStructure, CLASS_CHOICES, SECTION_CHOICES, StudentAdmission, MonthlyFee, Student, School, SchoolSubscription, StudentResult, Subject, Teacher, TemporaryPassword, Syllabus, Announcement, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
+from .forms import AcademicSessionForm, FeeStructureForm, MonthlyFeeForm, PromoteExistingStudentForm, NotPromoteStudentForm, EditStudentForm, SchoolSubscriptionForm, TeacherForm, StudentResultForm, SubjectForm, StudentUserForm, SyllabusForm, StaffForm, AssetsForm,ExpensesForm, TransportForm, EventsForm, AnalyticsForm
+from .models import AcademicSession, FeeStructure, CLASS_CHOICES, SECTION_CHOICES, StudentAdmission, MonthlyFee, Student, School, SchoolSubscription, StudentResult, Subject, Teacher, TemporaryPassword, Syllabus, Announcement, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
 import uuid
 import os
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse, HttpResponse, HttpResponseForbidden
 from django.views.decorators.http import require_GET
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db import IntegrityError
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -27,21 +24,22 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from io import BytesIO
 import datetime
-from django.db.models import Q, Sum, Count, DecimalField, F
-from dateutil.relativedelta import relativedelta
+from django.db.models import Q, Sum, Count, F
+
 from django.urls import reverse
 from urllib.parse import urlencode
 import json
-from django.core.exceptions import ValidationError
-from django.contrib.auth.forms import AuthenticationForm
+
 import logging
-from django.db.models.functions import Coalesce
+from django.db.models.functions import TruncMonth
 from django.db.models import Value as V
-from .view_helpers import bulk_promote_students, create_repeated_admission, get_previous_balance, calculate_overall_grade
+from django.db.models import Avg, ExpressionWrapper, FloatField
+from .view_helpers import calculate_overall_grade
 
 from django.apps import apps
 from plotly.offline import plot
 import plotly.express as px
+import plotly.graph_objects as go
 from django.http import JsonResponse
 import pandas as pd
 import io
@@ -83,7 +81,6 @@ from .view_parts.admissions import (
 from django.core.paginator import Paginator, EmptyPage, PageNotAnInteger
 
 import datetime
-from decimal import Decimal
 from django.db import transaction
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
@@ -91,10 +88,321 @@ from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 from django.utils.http import urlencode
 
-from .models import AcademicSession, StudentAdmission, FeeStructure, MonthlyFee, CLASS_PROGRESSION
+from .models import AcademicSession, StudentAdmission, FeeStructure, MonthlyFee, CLASS_PROGRESSION, Period, Timetable, Subject, Teacher, StudentResult
 from .forms import PromoteExistingStudentForm
-from .utils import get_pending_balance
+from .utils import (
+    create_monthly_fees_for_student,
+    generate_monthly_fee_months,
+    get_active_session,
+    get_pending_balance,
+    recalculate_monthly_chain,
+    create_repeat_admission,
+    annotate_outstanding,
+)
 logger = logging.getLogger(__name__)
+
+
+
+# ──────────────────────────────────────────────────────────────
+# views.py  ── Timetable feature (3 views)
+#
+#   period_manage    → create/edit/delete school-wide Period slots
+#   timetable_view   → select class+section, show editable grid
+#   timetable_save   → POST handler for saving one period slot
+# ──────────────────────────────────────────────────────────────
+# ── Period Management ─────────────────────────────────────────
+ 
+@school_staff_required
+def period_manage(request):
+    """
+    Create, edit, and delete school-wide Period slots.
+    Periods are shared across all class/section timetables.
+    """
+    school = request.user.school
+    periods = Period.objects.filter(school=school).order_by('order')
+ 
+    if request.method == 'POST':
+        action = request.POST.get('action')
+ 
+        # ── Delete ────────────────────────────────────────────
+        if action == 'delete':
+            period_id = request.POST.get('period_id')
+            period = get_object_or_404(Period, id=period_id, school=school)
+            slot_count = period.timetable_slots.count()
+            if slot_count > 0:
+                messages.error(
+                    request,
+                    f"Cannot delete '{period.name}' — it is used in {slot_count} timetable slot(s). "
+                    f"Remove those assignments first."
+                )
+            else:
+                period.delete()
+                messages.success(request, f"Period '{period.name}' deleted.")
+            return redirect('period_manage')
+ 
+        # ── Create or Update ──────────────────────────────────
+        period_id  = request.POST.get('period_id')   # set on edit, empty on create
+        name       = request.POST.get('name', '').strip()
+        start_time = request.POST.get('start_time', '').strip()
+        end_time   = request.POST.get('end_time', '').strip()
+        order      = request.POST.get('order', '1').strip()
+        is_break   = request.POST.get('is_break') == 'on'
+ 
+        errors = []
+        if not name:
+            errors.append("Period name is required.")
+        if not start_time:
+            errors.append("Start time is required.")
+        if not end_time:
+            errors.append("End time is required.")
+        if start_time and end_time and start_time >= end_time:
+            errors.append("End time must be after start time.")
+ 
+        if errors:
+            for e in errors:
+                messages.error(request, e)
+            return redirect('period_manage')
+ 
+        try:
+            order = int(order)
+        except ValueError:
+            order = periods.count() + 1
+ 
+        if period_id:
+            # Edit existing
+            period = get_object_or_404(Period, id=period_id, school=school)
+            period.name       = name
+            period.start_time = start_time
+            period.end_time   = end_time
+            period.order      = order
+            period.is_break   = is_break
+            period.save()
+            messages.success(request, f"Period '{name}' updated.")
+        else:
+            # Create new
+            if Period.objects.filter(school=school, name=name).exists():
+                messages.error(request, f"A period named '{name}' already exists.")
+                return redirect('period_manage')
+            Period.objects.create(
+                school     = school,
+                name       = name,
+                start_time = start_time,
+                end_time   = end_time,
+                order      = order,
+                is_break   = is_break,
+            )
+            messages.success(request, f"Period '{name}' created.")
+ 
+        return redirect('period_manage')
+ 
+    return render(request, 'main_app/period_manage.html', {
+        'periods': periods,
+        'school':  school,
+    })
+ 
+ 
+# ── Timetable Grid View ───────────────────────────────────────
+ 
+@school_staff_required
+def timetable_view(request):
+    """
+    Shows an editable timetable grid for a selected class + section.
+    Each row is a Period; each cell has Subject + Teacher dropdowns.
+ 
+    Teacher conflict warnings are computed here (soft — displayed,
+    not blocking).
+    """
+    active_session = get_active_session(request)
+    if not active_session:
+        messages.error(request, "No active session found.")
+        return redirect('dashboard')
+ 
+    school   = request.user.school
+    periods  = Period.objects.filter(school=school).order_by('order')
+ 
+    # Class/section choices from existing admissions in this session
+    from .models import StudentAdmission
+    from django.db.models import Count
+    class_section_qs = (
+        StudentAdmission.objects
+        .filter(academic_session=active_session, student__school=school)
+        .values('class_name', 'section')
+        .distinct()
+        .order_by('class_name', 'section')
+    )
+    class_sections = list(class_section_qs)
+ 
+    selected_class   = request.GET.get('class_name', '')
+    selected_section = request.GET.get('section', '')
+ 
+    grid        = []
+    conflicts   = []
+    slot_map    = {}
+ 
+    if selected_class and selected_section:
+        # Existing timetable slots for this class/section/session
+        existing_slots = Timetable.objects.filter(
+            school           = school,
+            academic_session = active_session,
+            class_name       = selected_class,
+            section          = selected_section,
+        ).select_related('period', 'subject', 'teacher')
+ 
+        slot_map = {slot.period_id: slot for slot in existing_slots}
+ 
+        # Available subjects and teachers for JS dropdowns
+        subjects = Subject.objects.filter(school=school).order_by('name')
+        teachers = Teacher.objects.filter(school=school).order_by('name')
+ 
+        # Teacher conflict detection:
+        # Find teachers already assigned in this session (any class/section)
+        # keyed by period_id → set of teacher_ids
+        all_slots = Timetable.objects.filter(
+            school           = school,
+            academic_session = active_session,
+        ).exclude(
+            class_name = selected_class,
+            section    = selected_section,
+        ).select_related('teacher', 'period')
+ 
+        teacher_period_map = {}   # period_id → [(teacher_id, class, section)]
+        for s in all_slots:
+            if s.teacher_id:
+                teacher_period_map.setdefault(s.period_id, []).append({
+                    'teacher_id':  s.teacher_id,
+                    'teacher_name': s.teacher.name,
+                    'class_name':  s.class_name,
+                    'section':     s.section,
+                })
+ 
+        # Build grid rows
+        for period in periods:
+            slot = slot_map.get(period.id)
+ 
+            # Conflict check for this period
+            period_conflicts = []
+            if slot and slot.teacher_id:
+                for other in teacher_period_map.get(period.id, []):
+                    if other['teacher_id'] == slot.teacher_id:
+                        period_conflicts.append(
+                            f"{slot.teacher.name} is also assigned to "
+                            f"{other['class_name']} - {other['section']} in {period.name}."
+                        )
+                        conflicts.extend(period_conflicts)
+ 
+            grid.append({
+                'period':           period,
+                'slot':             slot,
+                'slot_subject_id':  slot.subject_id  if slot else None,
+                'slot_teacher_id':  slot.teacher_id  if slot else None,
+                'conflicts':        period_conflicts,
+            })
+ 
+        # Serialize subjects/teachers for JS dynamic filtering
+        subjects_json = json.dumps([
+            {'id': s.id, 'name': s.name}
+            for s in subjects
+        ])
+        teachers_json = json.dumps([
+            {
+                'id':       t.id,
+                'name':     t.name,
+                'subjects': list(t.subjects.values_list('id', flat=True)),
+            }
+            for t in teachers
+        ])
+    else:
+        subjects_json = '[]'
+        teachers_json = '[]'
+        subjects      = []
+        teachers      = []
+ 
+    return render(request, 'main_app/timetable_view.html', {
+        'active_session':  active_session,
+        'school':          school,
+        'periods':         periods,
+        'class_sections':  class_sections,
+        'selected_class':  selected_class,
+        'selected_section': selected_section,
+        'grid':            grid,
+        'conflicts':       conflicts,
+        'subjects_json':   subjects_json,
+        'teachers_json':   teachers_json,
+    })
+ 
+ 
+# ── Timetable Save (single slot POST) ────────────────────────
+ 
+@school_staff_required
+def timetable_save(request):
+    """
+    Saves or clears a single timetable slot (one period in one
+    class/section). Called via form POST from the grid.
+ 
+    POST fields:
+        class_name, section, period_id, subject_id, teacher_id
+        (subject_id / teacher_id can be empty → clears the slot)
+    """
+    if request.method != 'POST':
+        return redirect('timetable_view')
+ 
+    active_session = get_active_session(request)
+    if not active_session:
+        messages.error(request, "No active session found.")
+        return redirect('timetable_view')
+ 
+    school = request.user.school
+ 
+    class_name  = request.POST.get('class_name', '').strip()
+    section     = request.POST.get('section', '').strip()
+    period_id   = request.POST.get('period_id', '').strip()
+    subject_id  = request.POST.get('subject_id', '').strip() or None
+    teacher_id  = request.POST.get('teacher_id', '').strip() or None
+ 
+    if not all([class_name, section, period_id]):
+        messages.error(request, "Missing required fields.")
+        return redirect(f"{request.META.get('HTTP_REFERER', 'timetable_view')}")
+ 
+    period  = get_object_or_404(Period, id=period_id, school=school)
+    subject = get_object_or_404(Subject, id=subject_id, school=school) if subject_id else None
+    teacher = get_object_or_404(Teacher, id=teacher_id, school=school) if teacher_id else None
+ 
+    try:
+        with transaction.atomic():
+            if subject is None and teacher is None:
+                # Clear the slot
+                Timetable.objects.filter(
+                    school           = school,
+                    academic_session = active_session,
+                    class_name       = class_name,
+                    section          = section,
+                    period           = period,
+                ).delete()
+                messages.success(request, f"{period.name} cleared.")
+            else:
+                slot, created = Timetable.objects.update_or_create(
+                    school           = school,
+                    academic_session = active_session,
+                    class_name       = class_name,
+                    section          = section,
+                    period           = period,
+                    defaults={
+                        'subject':  subject,
+                        'teacher':  teacher,
+                        'operator': request.user,
+                    },
+                )
+                action = "saved" if created else "updated"
+                messages.success(request, f"{period.name} {action}.")
+ 
+    except Exception as exc:
+        logger.error("Timetable save error: %s", exc, exc_info=True)
+        messages.error(request, f"Error saving timetable: {exc}")
+ 
+    return redirect(f"{reverse('timetable_view')}?class_name={class_name}&section={section}")
+
+
+
 
 
 @school_staff_required
@@ -102,87 +410,320 @@ def dashboard(request):
     active_session = get_active_session(request)
     context = {
         'session_exists': AcademicSession.objects.filter(school=request.user.school).exists(),
-        'active_session': active_session,
+        'active_session':  active_session,
     }
 
     if active_session:
         base_qs = StudentAdmission.objects.filter(
-            academic_session=active_session,
-            student__school=request.user.school,
-            status=True
+            academic_session = active_session,
+            student__school  = request.user.school,
+            status            = True,
         ).select_related('student')
 
+        # === FIX: split new admissions from not-promoted (repeat) students ===
         stats = base_qs.aggregate(
-            total_students=Count('id'),
-            new_admissions=Count('id', filter=Q(promoted=False)),
-            promoted_students=Count('id', filter=Q(promoted=True)),
-            total_classes=Count('class_name', distinct=True),
-            total_sections=Count('section', distinct=True),
+            total_students       = Count('id'),
+            new_admissions       = Count('id', filter=Q(promoted_from__isnull=True)),
+            promoted_students    = Count('id', filter=Q(promoted=True)),
+            not_promoted_students = Count('id', filter=Q(promoted_from__isnull=False, promoted=False)),
+            total_classes        = Count('class_name', distinct=True),
+            total_sections       = Count('section', distinct=True),
         )
 
-        balance_result = MonthlyFee.objects.filter(
-            student_admission__academic_session=active_session,
-            student_admission__student__school=request.user.school,
-        ).aggregate(total=Sum('current_balance'))
+        # === FIX: outstanding balance via latest-month subquery, not Sum() ===
+        outstanding_qs = annotate_outstanding(base_qs)
+        total_balance = outstanding_qs.aggregate(total=Sum('outstanding'))['total'] or 0
 
-        # Search functionality
-        search_results = []
-        search_type = request.GET.get('search_type', request.session.get('search_type', ''))
-        search_value = request.GET.get('search_value', request.session.get('search_value', '')).strip().lower()
+        # === NEW: Fee Collection Rate ===
+        # total_billed  = one-time admission charges + every month's (monthly_fee + transport_fee)
+        # total_received = one-time admission received + every month's received
+        # These are GROSS totals (not running balances), so summing across
+        # all months is correct here — unlike current_balance, monthly_fee/
+        # transport_fee/received are NOT cumulative, they're per-month amounts.
+        admission_totals = base_qs.aggregate(
+            admission_billed   = Sum('total_dues'),
+            admission_received = Sum('received'),
+        )
+        monthly_totals = MonthlyFee.objects.filter(
+            student_admission__academic_session = active_session,
+            student_admission__student__school   = request.user.school,
+        ).aggregate(
+            monthly_billed   = Sum(F('monthly_fee') + F('transport_fee')),
+            monthly_received = Sum('received'),
+        )
 
-        if request.GET.get('clear_search'):
-            request.session.pop('search_type', None)
-            request.session.pop('search_value', None)
-            search_type = ''
-            search_value = ''
+        total_billed = (admission_totals['admission_billed'] or 0) + (monthly_totals['monthly_billed'] or 0)
+        total_received = (admission_totals['admission_received'] or 0) + (monthly_totals['monthly_received'] or 0)
+        collection_rate = round((total_received / total_billed * 100), 1) if total_billed > 0 else 0.0
 
-        if search_type and search_value:
-            queryset = base_qs
-            if search_type == 'student_id':
-                search_results = list(queryset.filter(student__student_id__iexact=search_value))
-            elif search_type == 'contact':
-                search_results = list(queryset.filter(student__contact__iexact=search_value))
-            elif search_type == 'father_name':
-                search_results = list(queryset.filter(student__father_guardian_name__iexact=search_value))
-
-            if not search_results:
-                messages.warning(request, "No results found.")
-
-            request.session['search_type'] = search_type
-            request.session['search_value'] = search_value
+        # === NEW: Top 5 outstanding balances ===
+        top_outstanding = (
+            outstanding_qs
+            .filter(outstanding__gt=0)
+            .order_by('-outstanding')[:5]
+        )
 
         context.update({
-            'total_students': stats['total_students'],
-            'new_admissions': stats['new_admissions'],
-            'promoted_students': stats['promoted_students'],
-            'total_classes': stats['total_classes'],
-            'total_sections': stats['total_sections'],
-            'total_balance': balance_result['total'] or 0,
-            'search_results': search_results,
-            'search_type': search_type,
-            'search_value': search_value,
+            'total_students':        stats['total_students'],
+            'new_admissions':        stats['new_admissions'],
+            'promoted_students':     stats['promoted_students'],
+            'not_promoted_students': stats['not_promoted_students'],
+            'total_classes':         stats['total_classes'],
+            'total_sections':        stats['total_sections'],
+            'total_balance':         total_balance,
+            'collection_rate':       collection_rate,
+            'total_billed':          total_billed,
+            'total_received':        total_received,
+            'top_outstanding':       top_outstanding,
         })
 
     return render(request, 'main_app/dashboard.html', context)
 
 
+
+# ── Student Directory (list) ──────────────────────────────────
+ 
+@school_staff_required
+def student_directory(request):
+    active_session = get_active_session(request)
+    if not active_session:
+        return render(request, 'main_app/student_directory.html', {
+            'no_active_session': True,
+        })
+ 
+    school = request.user.school
+ 
+    # ── Base queryset for THIS session (used for filtered table) ──
+    base_qs = StudentAdmission.objects.filter(
+        academic_session = active_session,
+        student__school  = school,
+    ).select_related('student')
+ 
+    # Latest MonthlyFee balance per admission (subquery — avoids N+1)
+    base_qs = annotate_outstanding(base_qs)
+ 
+    # ── Top summary bar: ALWAYS unfiltered (whole active session) ──
+    class_section_counts = (
+        StudentAdmission.objects.filter(
+            academic_session = active_session,
+            student__school  = school,
+        )
+        .values('class_name', 'section')
+        .annotate(count=Count('id'))
+        .order_by('class_name', 'section')
+    )
+ 
+    total_students = sum(c['count'] for c in class_section_counts)
+ 
+    total_outstanding = base_qs.aggregate(total=Sum('outstanding'))['total'] or 0
+ 
+    # ── Filters (applied only to the table below) ─────────────────
+    filter_class   = request.GET.get('class_name', '')
+    filter_section = request.GET.get('section', '')
+    filter_status  = request.GET.get('status', '')
+    search_query   = request.GET.get('search', '').strip()
+ 
+    filtered_qs = base_qs
+ 
+    if filter_class:
+        filtered_qs = filtered_qs.filter(class_name=filter_class)
+    if filter_section:
+        filtered_qs = filtered_qs.filter(section=filter_section)
+ 
+    if filter_status == 'new':
+        filtered_qs = filtered_qs.filter(promoted_from__isnull=True)
+    elif filter_status == 'promoted':
+        filtered_qs = filtered_qs.filter(promoted_from__isnull=False, promoted=True)
+    elif filter_status == 'not_promoted':
+        filtered_qs = filtered_qs.filter(promoted_from__isnull=False, promoted=False)
+ 
+    if search_query:
+        filtered_qs = filtered_qs.filter(
+            Q(student__first_name__icontains=search_query)
+            | Q(student__last_name__icontains=search_query)
+            | Q(student__student_id__icontains=search_query)
+            | Q(student__father_guardian_name__icontains=search_query)
+            | Q(student__contact__icontains=search_query)
+        )
+ 
+    filtered_qs = filtered_qs.order_by('class_name', 'section', 'roll_number')
+ 
+    # ── Pagination ──────────────────────────────────────────────
+    paginator = Paginator(filtered_qs, 25)
+    page_number = request.GET.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+ 
+    # Attach a display-friendly status label per row (Python side —
+    # cheap since it's only for the current page, not the whole table)
+    for admission in page_obj:
+        if admission.promoted_from_id is None:
+            admission.status_label = 'New Admission'
+            admission.status_badge = 'primary'
+        elif admission.promoted:
+            admission.status_label = 'Promoted'
+            admission.status_badge = 'success'
+        else:
+            admission.status_label = 'Not Promoted'
+            admission.status_badge = 'warning'
+ 
+    # Class/section choices for filter dropdowns (from this session's data)
+    class_choices = sorted(set(c['class_name'] for c in class_section_counts))
+    section_choices = sorted(set(c['section'] for c in class_section_counts))
+ 
+    return render(request, 'main_app/student_directory.html', {
+        'no_active_session':     False,
+        'active_session':        active_session,
+        'page_obj':              page_obj,
+        'class_section_counts':  class_section_counts,
+        'total_students':        total_students,
+        'total_outstanding':     total_outstanding,
+        'class_choices':         class_choices,
+        'section_choices':       section_choices,
+        'filter_class':          filter_class,
+        'filter_section':        filter_section,
+        'filter_status':         filter_status,
+        'search_query':          search_query,
+    })
+ 
+ 
+# ── Student Profile (detail) ──────────────────────────────────
+ 
+@school_staff_required
+def student_profile(request, student_id):
+    school = request.user.school
+    active_session = get_active_session(request)
+ 
+    # Prefer the admission in the active session; fall back to the
+    # most recent admission overall if the student isn't in it
+    # (e.g. they graduated, left, or session context is being viewed
+    # for a student no longer current).
+    admission = (
+        StudentAdmission.objects
+        .filter(
+            student__student_id = student_id,
+            student__school     = school,
+            academic_session    = active_session,
+        )
+        .select_related('student', 'academic_session')
+        .first()
+    )
+ 
+    if not admission:
+        admission = get_object_or_404(
+            StudentAdmission.objects
+            .filter(student__student_id=student_id, student__school=school)
+            .select_related('student', 'academic_session')
+            .order_by('-academic_session__start_date')
+        )
+ 
+    student = admission.student
+ 
+    # ── Status label for THIS admission record ────────────────────
+    if admission.promoted_from_id is None:
+        status_label, status_badge = 'New Admission', 'primary'
+    elif admission.promoted:
+        status_label, status_badge = 'Promoted', 'success'
+    else:
+        status_label, status_badge = 'Not Promoted', 'warning'
+ 
+    # ── Admission history — walk promoted_from chain backward ──────
+    history = []
+    node = admission
+    while node:
+        if node.promoted_from_id is None:
+            node_status = 'New Admission'
+        elif node.promoted:
+            node_status = 'Promoted'
+        else:
+            node_status = 'Not Promoted'
+ 
+        history.append({
+            'session':     node.academic_session,
+            'class_name':  node.class_name,
+            'section':     node.section,
+            'roll_number': node.roll_number,
+            'status':      node_status,
+        })
+        node = node.promoted_from
+ 
+    # ── Fee summary for the displayed admission's session ──────────
+    monthly_fees = admission.monthly_fees.order_by('year', 'month_number')
+    fee_totals = monthly_fees.aggregate(
+        total_received = Sum('received'),
+        total_dues      = Sum('total_dues'),
+    )
+    last_fee = monthly_fees.last()
+    outstanding = last_fee.current_balance if last_fee else (admission.balance or 0)
+ 
+    # ── Results grouped by exam_type with per-exam average % ───────
+    results_qs = (
+        StudentResult.objects
+        .filter(student_admission=admission)
+        .select_related('subject')
+        .order_by('exam_type', 'subject__name')
+    )
+ 
+    results_by_exam = {}
+    for r in results_qs:
+        results_by_exam.setdefault(r.exam_type, []).append(r)
+ 
+    exam_summaries = []
+    for exam_type, rows in results_by_exam.items():
+        total_obtained = sum(r.obtained_marks for r in rows)
+        total_possible = sum(r.total_marks for r in rows)
+        avg_percentage = round((total_obtained / total_possible * 100), 2) if total_possible > 0 else 0.0
+        exam_summaries.append({
+            'exam_type':       exam_type,
+            'rows':            rows,
+            'avg_percentage':  avg_percentage,
+        })
+ 
+    return render(request, 'main_app/student_profile.html', {
+        'student':           student,
+        'admission':         admission,
+        'status_label':      status_label,
+        'status_badge':      status_badge,
+        'history':           history,
+        'fee_totals':        fee_totals,
+        'outstanding':       outstanding,
+        'monthly_fees':      monthly_fees,
+        'exam_summaries':    exam_summaries,
+        'active_session':    active_session,
+    })
+
+
 @school_staff_required
 def create_academic_session(request):
     active_session = get_active_session(request)
+ 
+    # Detect if we're in the setup wizard
+    setup = request.GET.get('setup') or request.POST.get('setup')
+ 
     if request.method == 'POST':
         form = AcademicSessionForm(request.POST, request=request)
         if form.is_valid():
             session = form.save(commit=False)
             session.school = request.user.school
             session.save()
-            messages.success(request, 'Academic session created successfully.')
+            messages.success(request, f"Session '{session.session_name}' created successfully.")
+ 
+            if setup:
+                # Wizard flow → go to fee structure
+                return redirect(f"{reverse('add_fee_structure')}?setup=1")
             return redirect('create_session')
     else:
         form = AcademicSessionForm(request=request)
-
-    sessions = AcademicSession.objects.filter(school=request.user.school).order_by('-start_date')
-    return render(request, 'main_app/create_session.html', {'form': form, 'sessions': sessions, 'active_session': active_session})
-
+ 
+    sessions = AcademicSession.objects.filter(
+        school=request.user.school
+    ).order_by('-start_date')
+ 
+    return render(request, 'main_app/create_session.html', {
+        'form':           form,
+        'sessions':       sessions,
+        'active_session': active_session,
+        'setup':          bool(setup),
+    })
 
 @school_staff_required
 def search_session(request):
@@ -197,38 +738,49 @@ def search_session(request):
 def add_fee_structure(request):
     active_session = get_active_session(request)
     if not active_session:
-        messages.error(request, "No active session found. Please create an active session first.")
+        messages.error(request, "No active session found. Please create one first.")
         return redirect('dashboard')
-
+ 
+    # Detect wizard
+    setup = request.GET.get('setup') or request.POST.get('setup')
+ 
     if request.method == 'POST':
         form = FeeStructureForm(request.POST)
         if form.is_valid():
             class_name = form.cleaned_data['class_name']
-
-            # Check if already exists
+ 
             if FeeStructure.objects.filter(
-                academic_session=active_session, 
-                class_name=class_name
+                academic_session = active_session,
+                class_name       = class_name,
             ).exists():
-                messages.warning(request, f"Fee structure for {class_name} already exists for this session.")
-                return redirect('add_fee_structure')
-
+                messages.warning(
+                    request,
+                    f"Fee structure for {class_name} already exists for this session."
+                )
+                redirect_url = f"{reverse('add_fee_structure')}{'?setup=1' if setup else ''}"
+                return redirect(redirect_url)
+ 
             fee_structure = form.save(commit=False)
-            fee_structure.school = request.user.school
+            fee_structure.school           = request.user.school
             fee_structure.academic_session = active_session
             fee_structure.save()
-
-            messages.success(request, "Fee structure added successfully!")
-            return redirect('add_fee_structure')
-
+ 
+            messages.success(request, f"Fee structure for {class_name} added successfully!")
+ 
+            # Stay on the fee structure page (admin may want to add more classes)
+            # The "Continue to Subjects →" button in the template handles Step 3.
+            redirect_url = f"{reverse('add_fee_structure')}{'?setup=1' if setup else ''}"
+            return redirect(redirect_url)
     else:
         form = FeeStructureForm()
-
+ 
     existing_fees = FeeStructure.objects.filter(academic_session=active_session)
+ 
     return render(request, 'main_app/add_fee_structure.html', {
-        'form': form,
+        'form':          form,
         'existing_fees': existing_fees,
         'active_session': active_session,
+        'setup':         bool(setup),
     })
 
 #------------------------Monthly Fee------------------------
@@ -290,79 +842,7 @@ def edit_fee_structure(request, fee_id):
 
     
 
-    current_date = datetime.datetime.now().strftime("%B %d, %Y %I:%M %p PKT")
-
-    # ====================== SCHOOL LOGO (Only once) ======================
-    if school and school.school_logo and os.path.exists(school.school_logo.path):
-        try:
-            logo = Image(school.school_logo.path, width=1.0*inch, height=1.0*inch)
-            logo.hAlign = 'RIGHT'
-            elements.append(logo)
-        except Exception as e:
-            logger.warning(f"School logo failed: {e}")
-    else:
-        elements.append(Paragraph("School Logo", normal_style))
-
-    elements.append(Spacer(1, 0.1*inch))
-    elements.append(Paragraph(f"<b>{school.school_name if school else 'School'}</b>", title_style))
-    elements.append(Paragraph(f"Date: {current_date}", small_style))
-    elements.append(Spacer(1, 0.4*inch))
-
-    # ====================== STUDENT PHOTO ======================
-    if student.image and os.path.exists(student.image.path):
-        try:
-            student_img = Image(student.image.path, width=1.7*inch, height=2.0*inch)
-            student_img.hAlign = 'LEFT'
-            elements.append(student_img)
-        except Exception as e:
-            logger.warning(f"Student image failed: {e}")
-            elements.append(Paragraph("Student Photo: Not Available", normal_style))
-    else:
-        elements.append(Paragraph("Student Photo: Not Available", normal_style))
-
-    elements.append(Spacer(1, 0.3*inch))
-
-    # ====================== STUDENT DETAILS ======================
-    details = [
-        f"<b>Student ID:</b> {student.student_id}",
-        f"<b>Name:</b> {student.first_name} {student.last_name}",
-        f"<b>Father/Guardian:</b> {student.father_guardian_name}",
-        f"<b>Class:</b> {admission.class_name} - {admission.section or 'N/A'}",
-        f"<b>Roll No:</b> {admission.roll_number}",
-        f"<b>Admission Date:</b> {admission.admission_date.strftime('%d %b %Y') if admission.admission_date else 'N/A'}",
-    ]
-
-    for line in details:
-        elements.append(Paragraph(line, normal_style))
-        elements.append(Spacer(1, 0.12*inch))
-
-    # Fee Summary
-    elements.append(Spacer(1, 0.25*inch))
-    elements.append(Paragraph("<b>Fee Summary</b>", styles['Heading3']))
-
-    fee_lines = [
-        f"Total Dues: <b>Rs {admission.total_dues or 0:.2f}</b>",
-        f"Received: Rs {admission.received or 0:.2f}",
-        f"Balance: <b>Rs {admission.balance or 0:.2f}</b>",
-    ]
-
-    for line in fee_lines:
-        elements.append(Paragraph(line, normal_style))
-        elements.append(Spacer(1, 0.1*inch))
-
-    elements.append(Spacer(1, 0.6*inch))
-    elements.append(Paragraph("Powered By AliyarWeb Solutions", small_style))
-
-    # Build PDF
-    doc.build(elements)
-    pdf = buffer.getvalue()
-    buffer.close()
-
-    filename = f"{student.first_name}_{student.last_name}_{admission.roll_number}.pdf".replace(" ", "_")
-
-    response = HttpResponse(pdf, content_type='application/pdf')
-    response['Content-Disposition'] = f'attachment; filename="{filename}"'
-    return response
+    
 
 @school_staff_required
 def get_fee_structure(request):
@@ -407,177 +887,293 @@ def monthly_fee(request):
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
+ 
     students = []
     if request.method == 'GET' and 'search' in request.GET:
-        search_query = request.GET.get('search', '').strip().lower()
-        search_type = request.GET.get('search_type', 'student_id')
+        search_query = request.GET.get('search', '').strip()
+        search_type  = request.GET.get('search_type', 'student_id')
+ 
         if search_query:
             queryset = StudentAdmission.objects.filter(
                 academic_session=active_session,
-                student__school=request.user.school
-            )
+                student__school=request.user.school,
+            ).select_related('student')
+ 
             if search_type == 'student_id':
                 query = Q(student__student_id__iexact=search_query)
             elif search_type == 'contact':
                 query = Q(student__contact__iexact=search_query)
             elif search_type == 'father_name':
-                query = Q(student__father_guardian_name__iexact=search_query)
+                query = Q(student__father_guardian_name__icontains=search_query)
             else:
-                query = Q(student__student_id__iexact=search_query) | Q(student__father_guardian_name__iexact=search_query) | Q(student__contact__iexact=search_query)
-            students = queryset.filter(query).distinct()
+                query = (
+                    Q(student__student_id__iexact=search_query)
+                    | Q(student__father_guardian_name__icontains=search_query)
+                    | Q(student__contact__iexact=search_query)
+                )
+ 
+            students = list(queryset.filter(query).distinct())
             if not students:
                 messages.warning(request, "No results found.")
-            elif len(students) == 1:
-                students = [students.first()]
+ 
     return render(request, 'main_app/monthly_fee.html', {
-        'students': students,
+        'students':       students,
         'active_session': active_session,
-        'search_type': request.GET.get('search_type', 'student_id'),
+        'search_type':    request.GET.get('search_type', 'student_id'),
     })
-
+ 
+ 
+# ── Detail + payment page ─────────────────────────────────────
+ 
 @school_staff_required
 def monthly_fee_detail(request, student_id):
     active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return render(request, 'main_app/monthly_fee_detail.html', {
-            'student': None, 'month_data': [], 'active_session': None
+            'student': None, 'month_data': [], 'active_session': None,
         })
-
+ 
     student_admission = get_object_or_404(
         StudentAdmission.objects.select_related('student'),
         student__student_id=student_id,
         academic_session=active_session,
-        student__school=request.user.school
+        student__school=request.user.school,
     )
-
-    # Prefetch existing fees
-    monthly_fees = MonthlyFee.objects.filter(student_admission=student_admission).order_by('year', 'month')
-    monthly_fee_dict = {fee.month: fee for fee in monthly_fees}
-
-    # Generate all months
-    start_month_date = active_session.start_date + relativedelta(months=1)
-    end_month_date = active_session.end_date
-    all_months = []
-    current_month_num = start_month_date.month
-    current_year = start_month_date.year
-
-    while True:
-        month_name = datetime.datetime(1900, current_month_num, 1).strftime('%B')
-        all_months.append((month_name, current_year))
-        
-        if current_month_num == end_month_date.month and current_year == end_month_date.year:
-            break
-        current_month_num += 1
-        if current_month_num > 12:
-            current_month_num = 1
-            current_year += 1
-
-    month_data = []
-    last_current_balance = student_admission.balance or Decimal('0.00')
-
-    for month, year in all_months:
-        fee = monthly_fee_dict.get(month)
-        if fee:
-            month_data.append({
-                'month': month,
-                'year': year,
-                'fee': fee,
-                'form': None,
-                'status': 'Paid' if fee.has_payment else 'Pending',
-                'disabled': fee.has_payment,
-            })
-            last_current_balance = fee.current_balance
-        else:
-            monthly_fee_value = (student_admission.tuition_fee or Decimal('0.00')) - (student_admission.discount or Decimal('0.00'))
-            transport_fee_value = student_admission.transport_fee if student_admission.transport == 'Paid' else Decimal('0.00')
-            
-            previous_balance = last_current_balance
-            total_dues = previous_balance + monthly_fee_value + transport_fee_value
-
-            initial_data = {
-                'student_admission': student_admission,
-                'month': month,
-                'year': year,
-                'previous_balance': previous_balance,
-                'monthly_fee': monthly_fee_value,
-                'transport_fee': transport_fee_value,
-                'total_dues': total_dues,
-                'received': Decimal('0.00'),
-                'current_balance': total_dues,
-            }
-            
-            form = MonthlyFeeForm(initial=initial_data, request=request)
-            month_data.append({
-                'month': month,
-                'year': year,
-                'fee': None,
-                'form': form,
-                'status': 'Pending',
-                'disabled': False,
-            })
-            last_current_balance = total_dues
-            student_admission.closing_balance = total_dues
-            student_admission.save(update_fields=['closing_balance'])
-
-    # ==================== POST Handling ====================
+ 
+    # Self-healing: generate records if missing
+    if not student_admission.monthly_fees.exists():
+        create_monthly_fees_for_student(student_admission)
+ 
     if request.method == 'POST':
-        post_month = request.POST.get('month')
-        post_year = int(request.POST.get('year', current_year))
+        return _handle_payment_post(request, student_admission, student_id)
+ 
+    month_data = _build_month_data(request, student_admission, active_session)
+    all_fees     = student_admission.monthly_fees.order_by('year', 'month_number')
+    last_fee     = all_fees.last()
 
-        existing_fee = MonthlyFee.objects.filter(
-            student_admission=student_admission,
-            month=post_month,
-            year=post_year
-        ).first()
-
-        if existing_fee and not existing_fee.has_payment:
-            form = MonthlyFeeForm(request.POST, instance=existing_fee, request=request)
-        else:
-            form = MonthlyFeeForm(request.POST, initial={'student_admission': student_admission}, request=request)
-
-        if form.is_valid():
-            try:
-                monthly_fee = form.save(commit=False)
-                monthly_fee.student_admission = student_admission
-                monthly_fee.operator = request.user
-                
-                # === CRITICAL FIX ===
-                if monthly_fee.received >= monthly_fee.total_dues:
-                    monthly_fee.has_payment = True
-                    monthly_fee.current_balance = Decimal('0.00')
-                else:
-                    monthly_fee.has_payment = False
-                    monthly_fee.current_balance = monthly_fee.total_dues - monthly_fee.received
-                
-                monthly_fee.save()
-
-                messages.success(request, f"Payment for {monthly_fee.month} {monthly_fee.year} saved successfully.")
-                return redirect('monthly_fee_success', monthly_fee_id=monthly_fee.id)
-
-            except Exception as e:
-                logger.error("Error saving payment: %s", str(e))
-                messages.error(request, f"Error saving payment: {str(e)}")
-        else:
-            messages.error(request, "Please correct the errors below.")
-            # Re-attach invalid form
-            for data in month_data:
-                if data.get('month') == post_month and data.get('year') == post_year:
-                    data['form'] = form
-                    break
-
-    context = {
-        'student': student_admission,
-        'month_data': month_data,
+    total_received  = sum(f.received or Decimal('0.00') for f in all_fees)
+    outstanding     = last_fee.current_balance if last_fee else (student_admission.balance or Decimal('0.00'))
+    total_dues_sum  = total_received + outstanding
+ 
+    return render(request, 'main_app/monthly_fee_detail.html', {
+        'student':        student_admission,
+        'month_data':     month_data,
         'active_session': active_session,
-    }
-    return render(request, 'main_app/monthly_fee_detail.html', context)
-
+        'summary_dues':     total_dues_sum,
+        'summary_received': total_received,
+        'summary_outstanding': outstanding,
+    })
+ 
+ 
+# ── POST handler (no MonthlyFeeForm) ─────────────────────────
+ 
+def _handle_payment_post(request, student_admission, student_id):
+    """
+    Saves a monthly payment without going through MonthlyFeeForm.
+ 
+    MonthlyFeeForm cannot be used for POST because:
+      1. student_admission is required by the form but is not sent in POST
+         (the view sets it after form.save(), which is too late for clean())
+      2. total_dues is .disabled for existing records so the browser strips
+         it from POST; cleaned_data.get('total_dues') returns None and
+         the received > total_dues check crashes
+      3. student_admission queryset is built from initial={} which is
+         empty on POST, so even if the pk was sent it would fail lookup
+ 
+    Instead we read only received + reviewed_by, validate them directly
+    against the already-stored fee_record values, save, and recalculate.
+    """
+    post_month = request.POST.get('month', '').strip()
+    post_year  = request.POST.get('year',  '').strip()
+ 
+    if not post_month or not post_year:
+        messages.error(request, "Invalid submission: month or year missing.")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    try:
+        post_year = int(post_year)
+    except ValueError:
+        messages.error(request, "Invalid year value.")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    fee_record = MonthlyFee.objects.filter(
+        student_admission=student_admission,
+        month=post_month,
+        year=post_year,
+    ).first()
+ 
+    if not fee_record:
+        messages.error(request, f"No fee record found for {post_month} {post_year}.")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    if fee_record.has_payment:
+        messages.warning(
+            request,
+            f"{post_month} {post_year} already has a payment recorded."
+        )
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    # Parse received amount
+    received_raw = request.POST.get('received', '').strip()
+    try:
+        received = Decimal(received_raw)
+    except (InvalidOperation, ValueError):
+        messages.error(request, f"Invalid amount: '{received_raw}'. Please enter a number.")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    if received < Decimal('0.00'):
+        messages.error(request, "Received amount cannot be negative.")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    if received > fee_record.total_dues:
+        messages.error(
+            request,
+            f"Rs {received} exceeds total dues of Rs {fee_record.total_dues} "
+            f"for {post_month} {post_year}."
+        )
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+    reviewed_by = request.POST.get('reviewed_by', '').strip() or request.user.username
+ 
+    try:
+        with transaction.atomic():
+            # Save only the user-provided fields;
+            # recalculate_monthly_chain() will update the chain fields.
+            fee_record.received     = received
+            fee_record.payment_date = datetime.date.today()
+            fee_record.has_payment  = received > Decimal('0.00')
+            fee_record.reviewed_by  = reviewed_by
+            fee_record.operator     = request.user
+            fee_record.save(update_fields=[
+                'received', 'payment_date', 'has_payment',
+                'reviewed_by', 'operator',
+            ])
+ 
+            # Cascade new balance through all subsequent months
+            recalculate_monthly_chain(student_admission)
+ 
+        messages.success(
+            request,
+            f"Payment of Rs {received} for {post_month} {post_year} recorded successfully."
+        )
+        return redirect('monthly_fee_success', monthly_fee_id=fee_record.id)
+ 
+    except Exception as exc:
+        logger.error("Payment save error: %s", exc, exc_info=True)
+        messages.error(request, f"Error saving payment: {exc}")
+        return redirect('monthly_fee_detail', student_id=student_id)
+ 
+ 
+# ── GET: build month cards ────────────────────────────────────
+ 
+def _build_month_data(request, student_admission, active_session):
+    """
+    Returns month_data list for the template.
+ 
+    Each dict:
+      fee=<MonthlyFee>  when record exists (paid or unpaid)
+      form=<MonthlyFeeForm>  when month needs a payment form
+        (used for display values only — NOT for POST validation)
+    """
+    monthly_fees = (
+        student_admission.monthly_fees
+        .order_by('year', 'month_number')
+    )
+    fee_map    = {(f.month, f.year): f for f in monthly_fees}
+    months     = generate_monthly_fee_months(active_session)
+    month_data = []
+ 
+    for m in months:
+        key        = (m['month'], m['year'])
+        fee_record = fee_map.get(key)
+ 
+        if fee_record:
+            if fee_record.has_payment:
+                # Paid or partial — read-only, no form needed
+                month_data.append({
+                    'month': m['month'],
+                    'year':  m['year'],
+                    'fee':   fee_record,
+                    'form':  None,
+                })
+            else:
+                # Record exists but no payment — show form pre-filled from record
+                month_data.append({
+                    'month': m['month'],
+                    'year':  m['year'],
+                    'fee':   fee_record,
+                    'form':  MonthlyFeeForm(
+                        initial={
+                            'student_admission': student_admission,
+                            'month':            fee_record.month,
+                            'year':             fee_record.year,
+                            'previous_balance': fee_record.previous_balance,
+                            'monthly_fee':      fee_record.monthly_fee,
+                            'transport_fee':    fee_record.transport_fee,
+                            'total_dues':       fee_record.total_dues,
+                            'received':         Decimal('0.00'),
+                            'current_balance':  fee_record.current_balance,
+                        },
+                        request=request,
+                    ),
+                })
+        else:
+            # Fallback: record missing — compute from chain
+            last_fee  = (
+                student_admission.monthly_fees
+                .filter(year__lte=m['year'])
+                .order_by('year', 'month_number')
+                .last()
+            )
+            prev_bal    = last_fee.current_balance if last_fee else (
+                student_admission.balance or Decimal('0.00')
+            )
+            net_monthly = max(
+                (student_admission.tuition_fee or Decimal('0.00'))
+                - (student_admission.discount   or Decimal('0.00')),
+                Decimal('0.00'),
+            )
+            transport   = (
+                student_admission.transport_fee
+                if student_admission.transport == 'Paid'
+                else Decimal('0.00')
+            )
+            total = prev_bal + net_monthly + transport
+ 
+            month_data.append({
+                'month': m['month'],
+                'year':  m['year'],
+                'fee':   None,
+                'form':  MonthlyFeeForm(
+                    initial={
+                        'student_admission': student_admission,
+                        'month':            m['month'],
+                        'year':             m['year'],
+                        'previous_balance': prev_bal,
+                        'monthly_fee':      net_monthly,
+                        'transport_fee':    transport,
+                        'total_dues':       total,
+                        'received':         Decimal('0.00'),
+                        'current_balance':  total,
+                    },
+                    request=request,
+                ),
+            })
+ 
+    return month_data
+ 
+ 
+# ── Success page ──────────────────────────────────────────────
 @school_staff_required
 def monthly_fee_success(request, monthly_fee_id):
-    monthly_fee = get_object_or_404(MonthlyFee, id=monthly_fee_id, student_admission__student__school=request.user.school)
-    messages.success(request, f"Payment for {monthly_fee.month} {monthly_fee.year} was successfully saved!")
-    return render(request, 'main_app/monthly_fee_success.html', {'monthly_fee': monthly_fee})
+    fee = get_object_or_404(
+        MonthlyFee,
+        id=monthly_fee_id,
+        student_admission__student__school=request.user.school,
+    )
+    return render(request, 'main_app/monthly_fee_success.html', {'monthly_fee': fee})
+ 
 
 @school_staff_required
 def monthly_fee_pdf(request, monthly_fee_id):
@@ -659,171 +1255,7 @@ def monthly_fee_pdf(request, monthly_fee_id):
 
 
 #-----------------------Promote offline studnets--------------------
-@school_staff_required
-def promote_offline_student(request):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found. Please create an active session first.")
-        return redirect('dashboard')
-    initial_data = request.session.get('promote_offline_data', {'transport': 'No'})
-    temp_image_path = request.session.get('temp_image_path')
-    temp_image_relative = None
-    if temp_image_path:
-        temp_image_relative = os.path.relpath(temp_image_path, settings.MEDIA_ROOT).replace('\\', '/')
-    if request.method == 'POST':
-        form = PromoteOfflineStudentForm(request.POST, request.FILES, request=request)
-        if form.is_valid():
-            cleaned_data = form.cleaned_data.copy()
-            if 'admission_date' in cleaned_data and isinstance(cleaned_data['admission_date'], datetime.date):
-                cleaned_data['admission_date'] = cleaned_data['admission_date'].isoformat()
-            if 'date_of_birth' in cleaned_data and isinstance(cleaned_data['date_of_birth'], datetime.date):
-                cleaned_data['date_of_birth'] = cleaned_data['date_of_birth'].isoformat()
-            decimal_fields = [
-                'transport_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee',
-                'other_fee', 'promotion_fee', 'discount', 'received', 'total_dues', 'balance'
-            ]
-            for field in decimal_fields:
-                if field in cleaned_data and isinstance(cleaned_data[field], Decimal):
-                    cleaned_data[field] = float(cleaned_data[field])
-            temp_image = cleaned_data.get('temp_image')
-            new_temp_image_path = None
-            if temp_image:
-                if temp_image_path and os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-                temp_filename = f"temp/{uuid.uuid4()}_{temp_image.name}"
-                temp_path = os.path.join(settings.MEDIA_ROOT, temp_filename)
-                os.makedirs(os.path.dirname(temp_path), exist_ok=True)
-                with open(temp_path, 'wb+') as destination:
-                    for chunk in temp_image.chunks():
-                        destination.write(chunk)
-                new_temp_image_path = temp_path
-                cleaned_data['temp_image'] = temp_filename
-            else:
-                cleaned_data['temp_image'] = initial_data.get('temp_image')
-                new_temp_image_path = temp_image_path
-            request.session['promote_offline_data'] = cleaned_data
-            request.session['temp_image_path'] = new_temp_image_path
-            return redirect('promote_offline_preview')
-    else:
-        form = PromoteOfflineStudentForm(initial=initial_data, request=request)
-    context = {
-        'form': form,
-        'active_session': active_session,
-        'temp_image_path': temp_image_relative,
-    }
-    return render(request, 'main_app/promote_offline_student.html', context)
 
-@school_staff_required
-def promote_offline_preview(request):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found. Please create an active session first.")
-        return redirect('dashboard')
-    promote_data = request.session.get('promote_offline_data')
-    temp_image_path = request.session.get('temp_image_path')
-    if not promote_data:
-        messages.error(request, "No promotion data found. Please start the process again.")
-        return redirect('promote_offline_student')
-    temp_image_relative = None
-    if temp_image_path:
-        temp_image_relative = os.path.relpath(temp_image_path, settings.MEDIA_ROOT).replace('\\', '/')
-    promote_data = promote_data.copy()
-    if 'admission_date' in promote_data:
-        promote_data['admission_date'] = datetime.date.fromisoformat(promote_data['admission_date'])
-    if 'date_of_birth' in promote_data:
-        promote_data['date_of_birth'] = datetime.date.fromisoformat(promote_data['date_of_birth'])
-    decimal_fields = [
-        'transport_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee',
-        'other_fee', 'promotion_fee', 'discount', 'received', 'total_dues', 'balance'
-    ]
-    for field in decimal_fields:
-        if field in promote_data and promote_data[field] is not None:
-            promote_data[field] = Decimal(str(promote_data[field]))
-    temp_image = None
-    if temp_image_path and os.path.exists(temp_image_path):
-        with open(temp_image_path, 'rb') as f:
-            from django.core.files.uploadedfile import InMemoryUploadedFile
-            import io
-            temp_image = InMemoryUploadedFile(
-                file=io.BytesIO(f.read()),
-                field_name='temp_image',
-                name=os.path.basename(temp_image_path),
-                content_type='image/jpeg',
-                size=os.path.getsize(temp_image_path),
-                charset=None
-            )
-            promote_data['temp_image'] = temp_image
-    try:
-        fee_structure = FeeStructure.objects.get(
-            academic_session=active_session,
-            class_name=promote_data['class_name']
-        )
-        fees = {
-            'tuition_fee': fee_structure.tuition_fee,
-            'book_fee': fee_structure.books_dues,
-            'uniform_fee': fee_structure.uniform_dues,
-            'other_fee': fee_structure.paper_money,
-            'promotion_fee': fee_structure.promotion_fee,
-            'other_charges': fee_structure.other_charges or 0.00,
-            'admission_fee': 0.00,
-        }
-    except FeeStructure.DoesNotExist:
-        fees = {
-            'tuition_fee': 0.00,
-            'book_fee': 0.00,
-            'uniform_fee': 0.00,
-            'other_fee': 0.00,
-            'promotion_fee': 0.00,
-            'other_charges': 0.00,
-            'admission_fee': 0.00,
-        }
-    if request.method == 'POST':
-        if 'confirm' in request.POST:
-            files = {}
-            if temp_image:
-                files['temp_image'] = temp_image
-            form = PromoteOfflineStudentForm(promote_data, files, request=request)
-            if form.is_valid():
-                admission = form.save(commit=False)
-                admission.student.school = request.user.school
-                admission.academic_session = active_session
-                admission.operator = request.user
-                admission.save()
-                messages.success(request, f"Student {admission.student.first_name} {admission.student.last_name} promoted successfully to {admission.class_name}, section {admission.section}.")
-                if temp_image_path and os.path.exists(temp_image_path):
-                    os.remove(temp_image_path)
-                if 'promote_offline_data' in request.session:
-                    del request.session['promote_offline_data']
-                if 'temp_image_path' in request.session:
-                    del request.session['temp_image_path']
-                return redirect('promote_offline_success', student_id=admission.student.student_id)
-            else:
-                messages.error(request, "Error saving the student. Please try again.")
-                return redirect('promote_offline_student')
-        elif 'edit' in request.POST:
-            return redirect('promote_offline_student')
-    context = {
-        'promote_data': promote_data,
-        'fees': fees,
-        'active_session': active_session,
-        'temp_image_path': temp_image_relative,
-    }
-    return render(request, 'main_app/promote_offline_preview.html', context)
-
-@school_staff_required
-def promote_offline_success(request, student_id):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('dashboard')
-    admission = get_object_or_404(
-        StudentAdmission,
-        student__student_id=student_id,
-        academic_session=active_session,
-        student__school=request.user.school
-    )
-    messages.success(request, f"Student {admission.student.first_name} {admission.student.last_name} has been successfully promoted to {admission.class_name}, section {admission.section}.")
-    return render(request, 'main_app/promote_offline_success.html', {'student': admission})
 
 
 
@@ -848,213 +1280,182 @@ def promoted_students_report(request):
     })
 
 
+# ──────────────────────────────────────────────────────────────
+# views.py  ── promote_existing_students (listing + bulk not-promote)
+# ──────────────────────────────────────────────────────────────
+#
+# Bulk "Promote" is intentionally NOT implemented — promotion requires
+# per-student fee review (discount, transport, roll number) via
+# PromoteExistingStudentForm, which cannot be safely auto-applied in bulk.
+#
+# Bulk "Not Promote" (repeat) IS implemented — create_repeat_admission()
+# is already fully automatic (no manual review step), so looping it
+# over selected students is safe.
+# ──────────────────────────────────────────────────────────────
+ 
 @school_staff_required
 def promote_existing_students(request):
     active_session = get_active_session(request)
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
-
+ 
     previous_session = AcademicSession.objects.filter(
-        school=request.user.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
+        school       = request.user.school,
+        is_active    = False,
+        end_date__lt = active_session.start_date,
     ).order_by('-end_date').first()
-
+ 
     if not previous_session:
         return render(request, 'main_app/promote_existing_students.html', {
-            'no_previous': True
+            'no_previous': True,
         })
-
-    # Filter Logic
-    class_choices = StudentAdmission.objects.filter(
-        academic_session=previous_session,
-        student__school=request.user.school,
-        promoted=False  # Only show students not yet promoted
-    ).values('class_name').distinct().order_by('class_name')
+ 
+    # ── Bulk "Not Promote" action ─────────────────────────────────
+    if request.method == 'POST' and request.POST.get('action') == 'not_promote':
+        return _handle_bulk_not_promote(request, active_session)
+ 
+    # ── Students already carried into the active session ─────────
+    # (promoted OR repeated — either way they already have a record
+    # in active_session and must be excluded from this list)
+    admitted_student_ids = list(
+        StudentAdmission.objects.filter(
+            academic_session = active_session,
+            student__school  = request.user.school,
+        ).values_list('student_id', flat=True)   # FK column, not Student.student_id string
+    )
+ 
+    pending_qs = StudentAdmission.objects.filter(
+        academic_session = previous_session,
+        student__school  = request.user.school,
+        status            = True,
+    ).exclude(
+        student_id__in = admitted_student_ids,
+    )
+ 
+    class_choices = (
+        pending_qs.values('class_name').distinct().order_by('class_name')
+    )
     class_choices = [c['class_name'] for c in class_choices]
-
-    section_choices = StudentAdmission.objects.filter(
-        academic_session=previous_session,
-        student__school=request.user.school,
-        promoted=False
-    ).values('section').distinct().order_by('section')
+ 
+    section_choices = (
+        pending_qs.values('section').distinct().order_by('section')
+    )
     section_choices = [(s['section'], s['section']) for s in section_choices]
-
+ 
+    # Bulk-action POST also lands here if action != 'not_promote'
+    # (shouldn't normally happen) — fall through to GET-style filtering.
     selected_class_name = request.POST.get('class_name') or request.GET.get('class_name', '')
-    selected_section = request.POST.get('section') or request.GET.get('section', '')
-
+    selected_section    = request.POST.get('section')    or request.GET.get('section', '')
+ 
     students = []
     if selected_class_name and selected_section:
-        students = StudentAdmission.objects.filter(
-            academic_session=previous_session,
-            student__school=request.user.school,
-            class_name=selected_class_name,
-            section=selected_section,
-            promoted=False
-        ).select_related('student').order_by('roll_number')
-
-        # Annotate pending balance for display
+        students = (
+            pending_qs.filter(
+                class_name = selected_class_name,
+                section    = selected_section,
+            )
+            .select_related('student')
+            .order_by('roll_number')
+        )
         for student in students:
             student.pending_balance = get_pending_balance(student)
-
-    admitted_student_ids = list(StudentAdmission.objects.filter(
-        academic_session=active_session,
-        student__school=request.user.school
-    ).values_list('student__student_id', flat=True))
-
+ 
     return render(request, 'main_app/promote_existing_students.html', {
-        'class_choices': class_choices,
-        'section_choices': section_choices,
+        'class_choices':       class_choices,
+        'section_choices':     section_choices,
         'selected_class_name': selected_class_name,
-        'selected_section': selected_section,
-        'students': students,
-        'no_previous': False,
-        'active_session': active_session,
-        'admitted_student_ids': admitted_student_ids,
+        'selected_section':    selected_section,
+        'students':            students,
+        'no_previous':         False,
+        'active_session':      active_session,
     })
-
-
-@school_staff_required
-def bulk_promote_students_view(request):
-    #Processes mass student choices using system rules from table form states."""
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('promote_existing_students')
-
-    # Reads checkboxes from your grid layout: <input type="checkbox" name="admission_ids" value="ID">
-    admission_ids = request.POST.getlist('admission_ids')
-    target_section = request.POST.get('target_section', '').strip()
-
-    if not admission_ids:
-        messages.error(request, "No students selected for promotion.")
-        return redirect('promote_existing_students')
-
-    if not target_section:
-        messages.error(request, "Target section is required for bulk promotion.")
-        return redirect('promote_existing_students')
-
-    success_count = 0
-    
-    # Run the mass block safely inside an atomic transaction scope
-    try:
-        with transaction.atomic():
-            old_admissions = StudentAdmission.objects.select_for_update().filter(
-                id__in=admission_ids,
-                student__school=request.user.school
+ 
+ 
+def _handle_bulk_not_promote(request, active_session):
+    """
+    Bulk-applies create_repeat_admission() to every selected student.
+ 
+    Each student is processed independently — one failure (e.g. missing
+    fee structure, roll number conflict) does not stop the others.
+    A summary message reports successes and failures.
+    """
+    selected_class_name = request.POST.get('class_name', '')
+    selected_section    = request.POST.get('section', '')
+    student_ids         = request.POST.getlist('student_ids')   # Student.student_id strings
+ 
+    if not student_ids:
+        messages.warning(request, "No students selected.")
+        return redirect(
+            f"{reverse('promote_existing_students')}?"
+            f"class_name={selected_class_name}&section={selected_section}"
+        )
+ 
+    previous_session = AcademicSession.objects.filter(
+        school       = request.user.school,
+        is_active    = False,
+        end_date__lt = active_session.start_date,
+    ).order_by('-end_date').first()
+ 
+    succeeded = []
+    failed    = []
+ 
+    for sid in student_ids:
+        try:
+            old_admission = StudentAdmission.objects.get(
+                student__student_id = sid,
+                academic_session    = previous_session,
+                student__school     = request.user.school,
             )
+ 
+            # Skip if already carried over (defensive — UI shouldn't allow this)
+            if StudentAdmission.objects.filter(
+                student          = old_admission.student,
+                academic_session = active_session,
+            ).exists():
+                failed.append(f"{sid} (already admitted in current session)")
+                continue
+ 
+            roll_number = old_admission.roll_number
+ 
+            # Roll conflict check — skip rather than redirect mid-bulk-loop
+            if StudentAdmission.objects.filter(
+                roll_number      = roll_number,
+                class_name       = old_admission.class_name,
+                section          = old_admission.section,
+                academic_session = active_session,
+            ).exists():
+                failed.append(f"{sid} (roll number {roll_number} conflict — handle individually)")
+                continue
+ 
+            create_repeat_admission(
+                old_admission    = old_admission,
+                academic_session = active_session,
+                roll_number      = roll_number,
+                operator         = request.user,
+            )
+            succeeded.append(sid)
+ 
+        except StudentAdmission.DoesNotExist:
+            failed.append(f"{sid} (record not found)")
+        except ValueError as exc:
+            failed.append(f"{sid} ({exc})")
+        except Exception as exc:
+            logger.error("Bulk not-promote error for %s: %s", sid, exc, exc_info=True)
+            failed.append(f"{sid} (unexpected error)")
+ 
+    if succeeded:
+        messages.success(request, f"Marked not promoted: {len(succeeded)} student(s).")
+    if failed:
+        messages.error(request, f"Failed for {len(failed)} student(s): " + "; ".join(failed))
+ 
+    return redirect(
+        f"{reverse('promote_existing_students')}?"
+        f"class_name={selected_class_name}&section={selected_section}"
+    )
 
-            for old_admission in old_admissions:
-                # Direct dynamic row matching checks
-                roll_key = f'roll_number_{old_admission.id}'
-                pass_key = f'is_passed_{old_admission.id}'
-                
-                roll_value = request.POST.get(roll_key)
-                is_passed = request.POST.get(pass_key, 'true').lower() in ('1', 'true', 'yes', 'on')
 
-                try:
-                    target_roll = int(roll_value) if roll_value else old_admission.roll_number
-                except (TypeError, ValueError):
-                    raise ValueError(f"Invalid roll assignment input for {old_admission.student}")
 
-                # Calculate class progress tier
-                current_class = old_admission.class_name
-                target_class = CLASS_PROGRESSION.get(current_class, current_class) if is_passed else current_class
-
-                # Guard check for fee rules configurations
-                try:
-                    fee_struct = FeeStructure.objects.get(
-                        academic_session=active_session,
-                        class_name=target_class
-                    )
-                except FeeStructure.DoesNotExist:
-                    raise ValueError(f"No configured fee structure found for {target_class} in current active session.")
-
-                # Fee calculation logic matching single form structures
-                promo_charge = fee_struct.promotion_fee if is_passed else Decimal('0.00')
-                admission_session_dues = (
-                    fee_struct.paper_money +
-                    fee_struct.books_dues +
-                    fee_struct.uniform_dues +
-                    promo_charge +
-                    (fee_struct.other_charges or Decimal('0.00'))
-                )
-                
-                # Fetch balance from previous session
-                prev_session_balance = get_previous_balance(old_admission, active_session)
-                
-                # Setup unified final balance targets
-                total_session_dues = prev_session_balance + admission_session_dues + fee_struct.tuition_fee + (old_admission.transport_fee or Decimal('0.00'))
-
-                # Build the new session record entry link
-                new_admission = StudentAdmission.objects.create(
-                    student=old_admission.student,
-                    academic_session=active_session,
-                    class_name=target_class,
-                    section=target_section,
-                    roll_number=target_roll,
-                    admission_date=datetime.date.today(),
-                    promoted=True,
-                    failed_to_promote=not is_passed,
-                    status=True,
-                    operator=request.user,
-                    
-                    # Store applied structures layout values
-                    admission_fee=Decimal('0.00'), # Standard for promotions
-                    tuition_fee=fee_struct.tuition_fee,
-                    exam_fee=fee_struct.paper_money,
-                    book_fee=fee_struct.books_dues,
-                    uniform_fee=fee_struct.uniform_dues,
-                    promotion_fee=promo_charge,
-                    other_fee=fee_struct.other_charges,
-                    
-                    # Retain student route choices
-                    transport=old_admission.transport,
-                    transport_fee=old_admission.transport_fee,
-                    vehicle_no=old_admission.vehicle_no,
-                    route=old_admission.route,
-                    driver_contact=old_admission.driver_contact,
-                    
-                    previous_balance=prev_session_balance,
-                    discount=old_admission.discount or Decimal('0.00'),
-                    discount_behalf=old_admission.discount_behalf,
-                    received=Decimal('0.00'),
-                    total_dues=total_session_dues,
-                    balance=total_session_dues
-                )
-
-                # Initialize billing logs for the month
-                MonthlyFee.objects.create(
-                    student_admission=new_admission,
-                    month=active_session.start_date.strftime('%B'),
-                    year=active_session.start_date.year,
-                    previous_balance=prev_session_balance,
-                    monthly_fee=new_admission.tuition_fee or Decimal('0.00'),
-                    transport_fee=new_admission.transport_fee or Decimal('0.00'),
-                    total_dues=(prev_session_balance + (new_admission.tuition_fee or Decimal('0.00')) + (new_admission.transport_fee or Decimal('0.00'))),
-                    received=Decimal('0.00'),
-                    current_balance=(prev_session_balance + (new_admission.tuition_fee or Decimal('0.00')) + (new_admission.transport_fee or Decimal('0.00'))),
-                    operator=request.user
-                )
-
-                # Flag the historical record state
-                if is_passed:
-                    old_admission.promoted = True
-                    old_admission.failed_to_promote = False
-                else:
-                    old_admission.promoted = False
-                    old_admission.failed_to_promote = True
-                old_admission.status = False
-                old_admission.save()
-
-                success_count += 1
-                
-        messages.success(request, f"Successfully processed promotions for {success_count} students.")
-    except Exception as e:
-        messages.error(request, f"Bulk promotion aborted entirely due to error: {str(e)}")
-
-    return redirect('promote_existing_students')
 
 
 @school_staff_required
@@ -1063,86 +1464,108 @@ def promote_existing_student(request, student_id):
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
-
-    previous_session = AcademicSession.objects.filter(
-        school=request.user.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
-    ).order_by('-end_date').first()
-
+ 
+    # The session the student is being promoted FROM
+    previous_session = (
+        AcademicSession.objects
+        .filter(
+            school    = request.user.school,
+            is_active = False,
+            end_date__lt = active_session.start_date,
+        )
+        .order_by('-end_date')
+        .first()
+    )
+ 
     if not previous_session:
         messages.error(request, "No previous session found to promote from.")
         return redirect('promote_existing_students')
-
-    student_admission = get_object_or_404(
+ 
+    student_admission_obj = get_object_or_404(
         StudentAdmission,
-        student__student_id=student_id,
-        academic_session=previous_session,
-        student__school=request.user.school
+        student__student_id   = student_id,
+        academic_session      = previous_session,
+        student__school       = request.user.school,
     )
-
+ 
+    # Guard: already promoted to this session?
     if StudentAdmission.objects.filter(
-        student=student_admission.student,
-        academic_session=active_session
+        student          = student_admission_obj.student,
+        academic_session = active_session,
     ).exists():
-        messages.error(request, f"Student {student_admission.student.first_name} is already admitted in the current session.")
+        messages.error(
+            request,
+            f"{student_admission_obj.student.first_name} is already admitted in the current session."
+        )
         return redirect('promote_existing_students')
-
-    filtered_class = request.GET.get('class_name')
+ 
+    filtered_class   = request.GET.get('class_name')
     filtered_section = request.GET.get('section')
-
+ 
     form = PromoteExistingStudentForm(
-        request.POST or None,
-        request.FILES or None,
-        student_admission=student_admission,
-        request=request,
-        filtered_class=filtered_class,
-        filtered_section=filtered_section
+        request.POST   or None,
+        request.FILES  or None,
+        student_admission = student_admission_obj,
+        request           = request,
+        filtered_class    = filtered_class,
+        filtered_section  = filtered_section,
     )
-
+ 
     if request.method == 'POST' and form.is_valid():
         try:
             with transaction.atomic():
+                # 1. Save the new StudentAdmission (form no longer
+                #    creates MonthlyFee records — that is done here).
                 new_admission = form.save(commit=True)
-
-                messages.success(request, f"{student_admission.student.first_name} has been successfully promoted!")
-
-                query_params = urlencode({
-                    'class_name': filtered_class,
-                    'section': filtered_section
-                })
-                return redirect(f"{reverse('promote_existing_students')}?{query_params}")
-
-        except Exception as e:
-            messages.error(request, f"Promotion failed: {str(e)}")
-
-    # Fee structures for JS dynamic loading
+ 
+                # 2. Pre-generate all MonthlyFee records for the new
+                #    session and calculate the full chain.
+                create_monthly_fees_for_student(new_admission)
+ 
+                messages.success(
+                    request,
+                    f"{student_admission_obj.student.first_name} promoted successfully!"
+                )
+ 
+            query_params = urlencode({
+                'class_name': filtered_class,
+                'section':    filtered_section,
+            })
+            return redirect(f"{reverse('promote_existing_students')}?{query_params}")
+ 
+        except Exception as exc:
+            logger.error("Promotion error: %s", exc, exc_info=True)
+            messages.error(request, f"Promotion failed: {exc}")
+ 
+    # Fee structures for JS dynamic fee-loading on the template
     fee_structures = FeeStructure.objects.filter(
-        academic_session=active_session
+        school            = request.user.school,
+        academic_session  = active_session,
     ).values(
-        'class_name', 'tuition_fee', 'paper_money', 'books_dues',
-        'uniform_dues', 'other_charges', 'promotion_fee'
+        'class_name', 'tuition_fee', 'paper_money',
+        'books_dues', 'uniform_dues', 'other_charges', 'promotion_fee',
     )
-
+ 
     fee_structure_dict = {
         fs['class_name']: {
-            'tuition_fee': str(fs['tuition_fee']),
-            'exam_fee': str(fs['paper_money']),
-            'book_fee': str(fs['books_dues']),
-            'uniform_fee': str(fs['uniform_dues']),
-            'other_fee': str(fs.get('other_charges') or '0.00'),
-            'promotion_fee': str(fs.get('promotion_fee') or '0.00')
-        } for fs in fee_structures
+            'tuition_fee':  str(fs['tuition_fee']),
+            'exam_fee':     str(fs['paper_money']),
+            'book_fee':     str(fs['books_dues']),
+            'uniform_fee':  str(fs['uniform_dues']),
+            'other_fee':    str(fs.get('other_charges') or '0.00'),
+            'promotion_fee': str(fs.get('promotion_fee') or '0.00'),
+        }
+        for fs in fee_structures
     }
-
+ 
     return render(request, 'main_app/promote_existing_student_form.html', {
-        'form': form,
-        'student': student_admission,
-        'current_class': student_admission.class_name,
-        'fee_structures': fee_structure_dict,
-        'filtered_class': filtered_class,
+        'form':             form,
+        'student':          student_admission_obj,
+        'current_class':    student_admission_obj.class_name,
+        'fee_structures':   fee_structure_dict,
+        'filtered_class':   filtered_class,
         'filtered_section': filtered_section,
-        'active_session': active_session,
+        'active_session':   active_session,
     })
 
 @school_staff_required
@@ -1151,20 +1574,24 @@ def promote_existing_success(request, student_id):
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('dashboard')
+
     student_admission = get_object_or_404(
         StudentAdmission,
-        student__student_id=student_id,
-        academic_session=active_session,
-        student__school=request.user.school
+        student__student_id = student_id,
+        academic_session    = active_session,
+        student__school     = request.user.school,
     )
-    filtered_class = request.GET.get('class_name')
-    filtered_section = request.GET.get('section')
+
     return render(request, 'main_app/promote_existing_success.html', {
-        'student': student_admission.student,
-        'class_name': filtered_class,
-        'section': filtered_section
+        'student_admission': student_admission,
+        'filtered_class':    request.GET.get('class_name', ''),
+        'filtered_section':  request.GET.get('section', ''),
     })
 
+
+# ──────────────────────────────────────────────────────────────
+# views.py  ── mark_not_promoted (rewritten, no more create_repeated_admission)
+# ──────────────────────────────────────────────────────────────
 
 @school_staff_required
 def mark_not_promoted(request, student_id):
@@ -1172,96 +1599,94 @@ def mark_not_promoted(request, student_id):
     if not active_session:
         messages.error(request, "No active session found.")
         return redirect('promote_existing_students')
-    # operate on the previous session admission
+
     previous_session = AcademicSession.objects.filter(
-        school=request.user.school,
-        is_active=False,
-        end_date__lt=active_session.start_date
+        school       = request.user.school,
+        is_active    = False,
+        end_date__lt = active_session.start_date,
     ).order_by('-end_date').first()
 
     if not previous_session:
-        messages.error(request, "No previous session found to mark not promoted.")
+        messages.error(request, "No previous session found.")
         return redirect('promote_existing_students')
 
-    student_admission = get_object_or_404(
+    student_admission_obj = get_object_or_404(
         StudentAdmission,
-        student__student_id=student_id,
-        academic_session=previous_session,
-        student__school=request.user.school
+        student__student_id = student_id,
+        academic_session    = previous_session,
+        student__school     = request.user.school,
     )
 
     if StudentAdmission.objects.filter(
-        student=student_admission.student,
-        academic_session=active_session
+        student          = student_admission_obj.student,
+        academic_session = active_session,
     ).exists():
-        messages.error(request, f"Student {student_admission.student.first_name} is already admitted in the current session.")
-        return redirect('promote_existing_students')
-
-    roll_number = student_admission.roll_number
-
-    # Check for roll number conflict
-    if StudentAdmission.objects.filter(
-        roll_number=roll_number,
-        class_name=student_admission.class_name,
-        section=student_admission.section,
-        academic_session=active_session
-    ).exists():
-        return redirect('roll_number_prompt', student_id=student_id)
-
-    try:
-        new_admission = create_repeated_admission(
-            student_admission, active_session, roll_number, request.user
+        messages.error(
+            request,
+            f"{student_admission_obj.student.first_name} is already admitted in the current session."
         )
-        new_admission.save()
-        
-        messages.success(request, f"Student {student_admission.student.first_name} marked as not promoted.")
-        return redirect('promote_existing_success', student_id=student_admission.student.student_id)
-    
-    except Exception as e:
-        messages.error(request, f"Error creating new admission: {str(e)}")
         return redirect('promote_existing_students')
 
-@school_staff_required
-def roll_number_prompt(request, student_id):
-    active_session = get_active_session(request)
-    if not active_session:
-        messages.error(request, "No active session found.")
-        return redirect('main_app/promote_existing_students')
-    student_admission = get_object_or_404(
-        StudentAdmission,
-        student__student_id=student_id,
-        student__school=request.user.school
-    )
-    if StudentAdmission.objects.filter(
-        student=student_admission.student,
-        academic_session=active_session
-    ).exists():
-        messages.error(request, f"Student {student_admission.student.first_name} is already admitted in the current session.")
-        return redirect('main_app/promote_existing_students')
-    filtered_class = request.GET.get('class_name')
+    filtered_class   = request.GET.get('class_name')
     filtered_section = request.GET.get('section')
-    if request.method == 'POST':
-        form = RollNumberPromptForm(
-            request.POST,
-            class_name=student_admission.class_name,
-            section=student_admission.section,
-            academic_session=active_session
-        )
-        if form.is_valid():
-            roll_number = form.cleaned_data['roll_number']
-            try:
-                new_admission = create_repeated_admission(
-                    student_admission, active_session, roll_number, request.user
-                )
-                new_admission.save()
-        
-                messages.success(request, f"Student {student_admission.student.first_name} marked as not promoted.")
-                return redirect('promote_existing_success', student_id=student_admission.student.student_id)
-    
-            except Exception as e:
-                messages.error(request, f"Error creating new admission: {str(e)}")
-                return redirect('promote_existing_students')
 
+    form = NotPromoteStudentForm(
+        request.POST  or None,
+        request.FILES or None,
+        student_admission = student_admission_obj,
+        request            = request,
+        filtered_class     = filtered_class,
+        filtered_section   = filtered_section,
+    )
+
+    if request.method == 'POST' and form.is_valid():
+        try:
+            with transaction.atomic():
+                new_admission = form.save(commit=True)
+                create_monthly_fees_for_student(new_admission)
+
+                messages.success(
+                    request,
+                    f"{student_admission_obj.student.first_name} marked as not promoted "
+                    f"and remains in {new_admission.class_name}."
+                )
+
+            query_params = urlencode({'class_name': filtered_class, 'section': filtered_section})
+            return redirect(
+                f"{reverse('promote_existing_success', args=[student_admission_obj.student.student_id])}"
+                f"?{query_params}"
+            )
+        except Exception as exc:
+            logger.error("Not-promote error: %s", exc, exc_info=True)
+            messages.error(request, f"Not-promote failed: {exc}")
+
+    fee_structures = FeeStructure.objects.filter(
+        school           = request.user.school,
+        academic_session = active_session,
+    ).values('class_name', 'tuition_fee', 'paper_money', 'books_dues', 'uniform_dues', 'other_charges')
+
+    fee_structure_dict = {
+        fs['class_name']: {
+            'tuition_fee':   str(fs['tuition_fee']),
+            'exam_fee':      str(fs['paper_money']),
+            'book_fee':      str(fs['books_dues']),
+            'uniform_fee':   str(fs['uniform_dues']),
+            'other_fee':     str(fs.get('other_charges') or '0.00'),
+            'promotion_fee': '0.00',
+        }
+        for fs in fee_structures
+    }
+
+    return render(request, 'main_app/mark-not-promoted.html', {
+        'form':             form,
+        'student':          student_admission_obj,
+        'current_class':    student_admission_obj.class_name,
+        'fee_structures':   json.dumps(fee_structure_dict),
+        'filtered_class':   filtered_class,
+        'filtered_section': filtered_section,
+        'active_session':   active_session,
+    })
+    
 
 
 #----------------------Teacher---------------------------    
@@ -1289,14 +1714,12 @@ def teacher_list(request):
 
 @school_staff_required
 def teacher_create(request):
-   
     if request.method == 'POST':
-        form = TeacherForm(data=request.POST, request=request)   # Better way
+        form = TeacherForm(data=request.POST, request=request)
         if form.is_valid():
             try:
                 form.save()
                 messages.success(request, "Teacher created successfully.")
-                logger.info("Teacher created: %s", form.cleaned_data.get('name'))
                 return redirect('teacher_list')
             except Exception as e:
                 logger.error("Error creating teacher: %s", str(e))
@@ -1305,23 +1728,35 @@ def teacher_create(request):
             logger.warning("Teacher form invalid: %s", form.errors)
             messages.error(request, f"Form invalid: {form.errors.as_text()}")
     else:
-        form = TeacherForm(request=request)   # GET request
-
+        form = TeacherForm(request=request)
+ 
+    # All currently assigned class+section pairs for this school.
+    # Passed as JSON so the template JS can disable taken sections
+    # dynamically when the admin selects a class.
+    assigned_pairs_json = json.dumps(
+        list(
+            Teacher.objects.filter(school=request.user.school)
+            .values_list('class_name', 'section')
+        )
+    )
+ 
     return render(request, 'main_app/teacher_form.html', {
-        'form': form, 
-        'action': 'Create'
+        'form':                form,
+        'action':              'Create',
+        'assigned_pairs_json': assigned_pairs_json,
     })
-
+ 
+ 
 @school_staff_required
 def teacher_update(request, teacher_id):
     teacher = get_object_or_404(Teacher, id=teacher_id, school=request.user.school)
+ 
     if request.method == 'POST':
         form = TeacherForm(request.POST, instance=teacher, request=request)
         if form.is_valid():
             try:
                 form.save()
                 messages.success(request, "Teacher updated successfully.")
-                logger.info("Teacher updated: %s", teacher.name)
                 return redirect('teacher_list')
             except Exception as e:
                 logger.error("Error updating teacher: %s", str(e))
@@ -1330,8 +1765,28 @@ def teacher_update(request, teacher_id):
             logger.warning("Teacher form invalid: %s", form.errors)
             messages.error(request, f"Form invalid: {form.errors.as_text()}")
     else:
-        form = TeacherForm(instance=teacher, request=request, initial={'username': teacher.user.username})
-    return render(request, 'main_app/teacher_form.html', {'form': form, 'action': 'Update', 'teacher': teacher})
+        form = TeacherForm(
+            instance=teacher,
+            request=request,
+            initial={'username': teacher.user.username if teacher.user else ''},
+        )
+ 
+    # On edit: exclude the current teacher's own assignment so their
+    # own class+section doesn't appear as "taken" in the JS filter.
+    assigned_pairs_json = json.dumps(
+        list(
+            Teacher.objects.filter(school=request.user.school)
+            .exclude(pk=teacher.pk)
+            .values_list('class_name', 'section')
+        )
+    )
+ 
+    return render(request, 'main_app/teacher_form.html', {
+        'form':                form,
+        'action':              'Update',
+        'teacher':             teacher,
+        'assigned_pairs_json': assigned_pairs_json,
+    })
 
 @school_staff_required
 def teacher_delete(request, teacher_id):
@@ -1508,33 +1963,42 @@ def result_delete(request, result_id):
     )
 
 #------------------------------Subjects---------------------------
+# ── 3. subject_list ───────────────────────────────────────────
+ 
 @school_staff_or_teacher_required
 def subject_list(request):
+    # Detect wizard
+    setup = request.GET.get('setup')
+ 
     if getattr(request.user, 'user_type', None) == 4:  # Teacher
-        # Show only subjects assigned to this teacher
         subjects = request.user.teacher.subjects.all().order_by('name')
-        
         context = {
-            'subjects': subjects,
+            'subjects':   subjects,
             'is_teacher': True,
-            'page_title': 'My Subjects'
+            'page_title': 'My Subjects',
+            'setup':      False,   # wizard never shown to teachers
         }
     else:  # Admin / Staff
         subjects = Subject.objects.filter(
             school=request.user.school
         ).order_by('name').prefetch_related('teacher_set')
-        
         context = {
-            'subjects': subjects,
+            'subjects':   subjects,
             'is_teacher': False,
-            'page_title': 'All Subjects'
+            'page_title': 'All Subjects',
+            'setup':      bool(setup),
         }
-    
+ 
     return render(request, 'main_app/subject_list.html', context)
 
+# ── 4. subject_create ─────────────────────────────────────────
+# (Carry the ?setup=1 flag through subject creation so the step
+# indicator stays visible while the admin adds multiple subjects.)
+ 
 @school_staff_or_teacher_required
 def subject_create(request):
-    
+    setup = request.GET.get('setup') or request.POST.get('setup')
+ 
     if request.method == 'POST':
         form = SubjectForm(request.POST, request=request)
         if form.is_valid():
@@ -1542,15 +2006,23 @@ def subject_create(request):
                 subject = form.save(commit=False)
                 subject.school = request.user.school
                 subject.save()
-                messages.success(request, "Subject created successfully.")
-                return redirect('subject_list')
+                messages.success(request, f"Subject '{subject.name}' created successfully.")
+ 
+                # Return to subject list, preserving wizard flag
+                redirect_url = f"{reverse('subject_list')}{'?setup=1' if setup else ''}"
+                return redirect(redirect_url)
             except Exception as e:
                 messages.error(request, f"Error creating subject: {str(e)}")
         else:
             messages.error(request, f"Form invalid: {form.errors.as_text()}")
     else:
         form = SubjectForm(request=request)
-    return render(request, 'main_app/subject_form.html', {'form': form, 'action': 'Create'})
+ 
+    return render(request, 'main_app/subject_form.html', {
+        'form':   form,
+        'action': 'Create',
+        'setup':  bool(setup),
+    })
 
 
 @school_staff_or_teacher_required
@@ -2184,344 +2656,883 @@ def events_detail(request, pk):
 
 
 
-#-------------------------Alnalytics---------------------------------
-
+# ── Analytics View (session-selectable deep dive) ────────────
+ 
+def _safe_html(fig):
+    """Standard layout tweaks + HTML export for every chart."""
+    return fig.update_layout(
+        margin=dict(l=10, r=10, t=20, b=50),
+        font=dict(family='Segoe UI, system-ui, sans-serif', size=12),
+        paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(0,0,0,0)',
+    ).to_html(full_html=False)
+ 
+ 
 @school_staff_required
 def analytics(request):
-    chart_html = None
-    form = AnalyticsForm(request.POST or None, request=request)
-    
-    user_school = request.user.school
+    school = request.user.school
+    form   = AnalyticsForm(request.POST or None, request=request)
+ 
+    # ── Session selector ──────────────────────────────────────
     selected_session_id = request.GET.get('session')
-    
     if selected_session_id:
-        active_session = AcademicSession.objects.filter(
-            id=selected_session_id, school=user_school
+        sel_session = AcademicSession.objects.filter(
+            id=selected_session_id, school=school
         ).first()
     else:
-        active_session = AcademicSession.objects.filter(
-            is_active=True, school=user_school
+        sel_session = AcademicSession.objects.filter(
+            is_active=True, school=school
         ).first()
-
-    all_sessions = AcademicSession.objects.filter(school=user_school).order_by('-start_date')
-
-    # ====================== PRE-COMPUTED CHARTS (Fast) ======================
-    
-    # 1. Pie Chart - Student Distribution
-    student_qs = StudentAdmission.objects.filter(student__school=user_school)
-    if active_session:
-        student_qs = student_qs.filter(academic_session=active_session)
-
-    pie_df = pd.DataFrame(list(
-        student_qs.values('class_name').annotate(count=Count('id')).order_by('class_name')
-    ))
-
-    pie_chart = px.pie(
-        pie_df, names='class_name', values='count',
-        title='🎓 Student Distribution by Class', hole=0.4
-    ).to_html() if not pie_df.empty else None
-
-    # 2. Financial Bar Chart
-    teacher_salary = Teacher.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or 0
-    staff_salary = Staff.objects.filter(school=user_school).aggregate(total=Sum('salary'))['total'] or 0
-
-    expenses_qs = Expenses.objects.filter(school=user_school)
-    if active_session:
-        expenses_qs = expenses_qs.filter(payment_date__range=(active_session.start_date, active_session.end_date))
-    total_expenses = expenses_qs.aggregate(total=Sum('price'))['total'] or 0
-
-    monthly_qs = MonthlyFee.objects.filter(student_admission__student__school=user_school)
-    if active_session:
-        monthly_qs = monthly_qs.filter(student_admission__academic_session=active_session)
-
-    fee_stats = monthly_qs.aggregate(
-        received=Sum('received'),
-        balance=Sum('current_balance')
+ 
+    all_sessions  = AcademicSession.objects.filter(school=school).order_by('start_date')
+    all_sessions_list = list(all_sessions)
+ 
+    # ── Session-scoped base querysets ─────────────────────────
+    if sel_session:
+        admission_qs   = StudentAdmission.objects.filter(
+            student__school=school, academic_session=sel_session, status=True,
+        )
+        monthly_fee_qs = MonthlyFee.objects.filter(
+            student_admission__academic_session=sel_session,
+            student_admission__student__school=school,
+        )
+        expenses_qs    = Expenses.objects.filter(
+            school=school,
+            payment_date__range=(sel_session.start_date, sel_session.end_date),
+        )
+        events_qs = sel_session  # used only for scoping below
+    else:
+        admission_qs   = StudentAdmission.objects.none()
+        monthly_fee_qs = MonthlyFee.objects.none()
+        expenses_qs    = Expenses.objects.none()
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION A — SCHOOL PROGRESS SCORE (cross-session)
+    # Composite index per session:
+    #   Collection Rate  30%
+    #   Retention Rate   25%
+    #   Enrollment Growth 25%
+    #   Pass Rate        20%
+    # ──────────────────────────────────────────────────────────
+    progress_data   = []
+    prev_student_ids = set()
+ 
+    for idx, session in enumerate(all_sessions_list):
+        s_adm = StudentAdmission.objects.filter(
+            student__school=school, academic_session=session, status=True,
+        )
+        s_mf  = MonthlyFee.objects.filter(
+            student_admission__academic_session=session,
+            student_admission__student__school=school,
+        )
+ 
+        # Collection rate
+        total_coll  = float(s_mf.aggregate(t=Sum('received'))['t'] or 0) + \
+                      float(s_adm.aggregate(t=Sum('received'))['t'] or 0)
+        adm_billed  = float(s_adm.aggregate(t=Sum('total_dues'))['t'] or 0)
+        mon_billed  = float(s_mf.aggregate(t=Sum(F('monthly_fee') + F('transport_fee')))['t'] or 0)
+        gross       = adm_billed + mon_billed
+        coll_rate   = min(total_coll / gross * 100, 100) if gross > 0 else 0
+ 
+        # Retention rate
+        curr_ids    = set(s_adm.values_list('student_id', flat=True))
+        retained    = len(curr_ids & prev_student_ids) if prev_student_ids else 0
+        ret_rate    = (retained / len(prev_student_ids) * 100) if prev_student_ids else 0
+        prev_student_ids = curr_ids
+ 
+        # Enrollment growth (vs previous session)
+        if idx > 0:
+            prev_count = progress_data[-1]['students']
+            curr_count = s_adm.count()
+            growth     = ((curr_count - prev_count) / prev_count * 100) if prev_count > 0 else 0
+            growth_capped = min(max(growth + 50, 0), 100)  # centre at 50% baseline
+        else:
+            curr_count    = s_adm.count()
+            growth        = 0
+            growth_capped = 50
+ 
+        # Pass rate
+        results     = StudentResult.objects.filter(student_admission__in=s_adm)
+        total_r     = results.count()
+        pass_r      = sum(1 for r in results.only('obtained_marks', 'total_marks') if r.grade != 'F')
+        pass_rate   = (pass_r / total_r * 100) if total_r > 0 else 0
+ 
+        # Composite score
+        if idx == 0:
+            score = coll_rate * 0.55 + pass_rate * 0.45
+        else:
+            score = (coll_rate * 0.30 + ret_rate * 0.25 +
+                     growth_capped * 0.25 + pass_rate * 0.20)
+ 
+        progress_data.append({
+            'session':         session.session_name,
+            'students':        curr_count,
+            'score':           round(score, 1),
+            'collection_rate': round(coll_rate, 1),
+            'retention_rate':  round(ret_rate, 1),
+            'enrollment_growth': round(growth, 1),
+            'pass_rate':       round(pass_rate, 1),
+        })
+ 
+    # Progress gauge (latest / selected session)
+    chart_progress_gauge = None
+    current_progress = next(
+        (p for p in reversed(progress_data)
+         if sel_session and p['session'] == sel_session.session_name),
+        progress_data[-1] if progress_data else None
     )
-
-    bar_df = pd.DataFrame({
-        "Category": ["Expenses", "Teacher Salaries", "Staff Salaries", "Fee Collected", "Balance"],
-        "Amount": [float(total_expenses), float(teacher_salary), float(staff_salary),
-                   float(fee_stats['received'] or 0), float(fee_stats['balance'] or 0)]
-    })
-
-    bar_chart = px.bar(bar_df, x="Category", y="Amount", title="💰 Financial Overview", 
-                       color="Category", text="Amount").to_html()
-
-    # 3. Trend Chart (Monthly Fee)
-    trend_chart = None
-    if active_session:
-        trend_qs = monthly_qs.values('payment_date').annotate(total=Sum('received')).order_by('payment_date')
-        trend_df = pd.DataFrame(list(trend_qs))
-        if not trend_df.empty:
-            trend_df['payment_date'] = pd.to_datetime(trend_df['payment_date'])
-            trend_chart = px.line(trend_df, x='payment_date', y='total', 
-                                title="📈 Monthly Fee Collection Trend", markers=True).to_html()
-
-    # ====================== INTERACTIVE CHART (Safely) ======================
+    if current_progress:
+        score = current_progress['score']
+        color = '#e53935' if score < 40 else '#fb8c00' if score < 70 else '#43a047'
+        fig   = go.Figure(go.Indicator(
+            mode  = 'gauge+number+delta',
+            value = score,
+            delta = {'reference': progress_data[-2]['score'] if len(progress_data) >= 2 else score,
+                     'relative': False},
+            gauge = {
+                'axis':  {'range': [0, 100], 'tickwidth': 1},
+                'bar':   {'color': color, 'thickness': 0.3},
+                'steps': [
+                    {'range': [0, 40],  'color': '#ffcdd2'},
+                    {'range': [40, 70], 'color': '#fff9c4'},
+                    {'range': [70, 100],'color': '#c8e6c9'},
+                ],
+                'threshold': {
+                    'line': {'color': '#1565c0', 'width': 3},
+                    'thickness': 0.75,
+                    'value': 70,
+                },
+            },
+            number={'suffix': '/100', 'font': {'size': 32}},
+        ))
+        fig.update_layout(
+            height=250,
+            margin=dict(l=20, r=20, t=20, b=20),
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family='Segoe UI, system-ui, sans-serif'),
+        )
+        chart_progress_gauge = fig.to_html(full_html=False)
+ 
+    # Progress trend line
+    chart_progress_trend = None
+    if len(progress_data) >= 2:
+        df  = pd.DataFrame(progress_data)
+        fig = px.line(
+            df, x='session',
+            y=['score', 'collection_rate', 'retention_rate', 'pass_rate'],
+            markers=True, template='plotly_white',
+            labels={'value': 'Score (%)', 'session': '', 'variable': ''},
+            color_discrete_map={
+                'score':           '#1565c0',
+                'collection_rate': '#43a047',
+                'retention_rate':  '#8e24aa',
+                'pass_rate':       '#fb8c00',
+            },
+        )
+        fig.update_layout(
+            legend=dict(orientation='h', yanchor='bottom', y=-0.45, title=''),
+            hovermode='x unified',
+        )
+        chart_progress_trend = _safe_html(fig)
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION B — STUDENT CHARTS
+    # ──────────────────────────────────────────────────────────
+ 
+    # 1. Student distribution by class (donut)
+    chart_student_dist = None
+    class_data = list(admission_qs.values('class_name').annotate(count=Count('id')).order_by('class_name'))
+    if class_data:
+        df  = pd.DataFrame(class_data)
+        fig = px.pie(df, names='class_name', values='count', hole=0.5, template='plotly_white')
+        fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=-0.45))
+        chart_student_dist = _safe_html(fig)
+ 
+    # 2. Admission status donut
+    chart_status = None
+    stats = admission_qs.aggregate(
+        new  = Count('id', filter=Q(promoted_from__isnull=True)),
+        prom = Count('id', filter=Q(promoted=True)),
+        notp = Count('id', filter=Q(promoted_from__isnull=False, promoted=False)),
+    )
+    status_rows = [
+        {'Status': 'New Admission', 'Count': stats['new']},
+        {'Status': 'Promoted',      'Count': stats['prom']},
+        {'Status': 'Not Promoted',  'Count': stats['notp']},
+    ]
+    sdf = pd.DataFrame([r for r in status_rows if r['Count'] > 0])
+    if not sdf.empty:
+        fig = px.pie(
+            sdf, names='Status', values='Count', hole=0.5, template='plotly_white',
+            color='Status',
+            color_discrete_map={
+                'New Admission': '#1e88e5',
+                'Promoted':      '#43a047',
+                'Not Promoted':  '#fb8c00',
+            },
+        )
+        fig.update_layout(legend=dict(orientation='h', yanchor='bottom', y=-0.45))
+        chart_status = _safe_html(fig)
+ 
+    # 3. Student retention rate per session (bar)
+    chart_retention = None
+    ret_rows = [p for p in progress_data if p['retention_rate'] > 0]
+    if ret_rows:
+        df  = pd.DataFrame(ret_rows)
+        fig = px.bar(
+            df, x='session', y='retention_rate',
+            template='plotly_white',
+            labels={'session': '', 'retention_rate': 'Retention (%)'},
+            color='retention_rate', color_continuous_scale='Greens',
+            text='retention_rate',
+        )
+        fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+        fig.update_layout(coloraxis_showscale=False, yaxis_range=[0, 110])
+        chart_retention = _safe_html(fig)
+ 
+    # 4. Class progression funnel
+    chart_funnel = None
+    if class_data:
+        # Define canonical class order; unknown classes go at end
+        CLASS_ORDER = [
+            'PG', 'Nursery', 'KG', 'Prep',
+            'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5',
+            'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10',
+        ]
+        df = pd.DataFrame(class_data)
+        df['order'] = df['class_name'].apply(
+            lambda c: CLASS_ORDER.index(c) if c in CLASS_ORDER else len(CLASS_ORDER)
+        )
+        df = df.sort_values('order')
+        fig = go.Figure(go.Funnel(
+            y    = df['class_name'].tolist(),
+            x    = df['count'].tolist(),
+            textposition = 'inside',
+            textinfo     = 'value+percent initial',
+            marker       = {'color': px.colors.sequential.Blues_r[:len(df)]},
+        ))
+        fig.update_layout(
+            margin=dict(l=10, r=10, t=20, b=10),
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family='Segoe UI, system-ui, sans-serif', size=12),
+            yaxis={'autorange': 'reversed'},
+        )
+        chart_funnel = fig.to_html(full_html=False)
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION C — FEE CHARTS
+    # ──────────────────────────────────────────────────────────
+ 
+    # 5. Monthly fee trend (billed vs collected)
+    chart_fee_trend = None
+    trend_data = list(
+        monthly_fee_qs
+        .values('month', 'year', 'month_number')
+        .annotate(
+            collected = Sum('received'),
+            billed    = Sum(F('monthly_fee') + F('transport_fee')),
+        )
+        .order_by('year', 'month_number')
+    )
+    if trend_data:
+        df = pd.DataFrame(trend_data)
+        df['period']    = df['month'] + ' ' + df['year'].astype(str)
+        df['collected'] = df['collected'].fillna(0).astype(float)
+        df['billed']    = df['billed'].fillna(0).astype(float)
+        fig = px.line(
+            df, x='period', y=['billed', 'collected'],
+            markers=True, template='plotly_white',
+            labels={'value': 'Amount (Rs)', 'period': '', 'variable': ''},
+            color_discrete_map={'billed': '#ef5350', 'collected': '#43a047'},
+        )
+        fig.update_layout(
+            hovermode='x unified',
+            legend=dict(orientation='h', yanchor='bottom', y=-0.45, title=''),
+            xaxis_tickangle=-30,
+        )
+        chart_fee_trend = _safe_html(fig)
+ 
+    # 6. Fee defaulter aging
+    chart_defaulters = None
+    top_defaulters   = []
+    if sel_session:
+        defaulter_qs = (
+            admission_qs
+            .annotate(
+                unpaid=Count(
+                    'monthly_fees',
+                    filter=Q(
+                        monthly_fees__has_payment=False,
+                        monthly_fees__total_dues__gt=0,
+                    )
+                )
+            )
+            .filter(unpaid__gt=0)
+            .select_related('student')
+            .order_by('-unpaid')
+        )
+        aging = {
+            '1 Month':   defaulter_qs.filter(unpaid=1).count(),
+            '2 Months':  defaulter_qs.filter(unpaid=2).count(),
+            '3+ Months': defaulter_qs.filter(unpaid__gte=3).count(),
+        }
+        aging_df = pd.DataFrame([
+            {'Aging': k, 'Students': v} for k, v in aging.items() if v > 0
+        ])
+        if not aging_df.empty:
+            fig = px.bar(
+                aging_df, x='Aging', y='Students',
+                template='plotly_white',
+                color='Aging',
+                color_discrete_map={
+                    '1 Month':   '#fb8c00',
+                    '2 Months':  '#f4511e',
+                    '3+ Months': '#e53935',
+                },
+                text='Students',
+            )
+            fig.update_traces(textposition='outside')
+            fig.update_layout(showlegend=False)
+            chart_defaulters = _safe_html(fig)
+ 
+        top_defaulters = list(
+            defaulter_qs[:10].values(
+                'student__first_name', 'student__last_name',
+                'student__student_id', 'class_name', 'section', 'unpaid',
+            )
+        )
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION D — FINANCIAL CHARTS
+    # ──────────────────────────────────────────────────────────
+ 
+    # 7. Revenue vs Operational Cost per session
+    chart_rev_vs_cost = None
+    if all_sessions_list:
+        rev_cost_rows = []
+        for session in all_sessions_list:
+            s_mf  = MonthlyFee.objects.filter(
+                student_admission__academic_session=session,
+                student_admission__student__school=school,
+            )
+            s_adm = StudentAdmission.objects.filter(
+                student__school=school, academic_session=session,
+            )
+            revenue = float(s_mf.aggregate(t=Sum('received'))['t'] or 0) + \
+                      float(s_adm.aggregate(t=Sum('received'))['t'] or 0)
+            exp     = float(Expenses.objects.filter(
+                school=school,
+                payment_date__range=(session.start_date, session.end_date),
+            ).aggregate(t=Sum('price'))['t'] or 0)
+            t_sal   = float(Teacher.objects.filter(school=school).aggregate(t=Sum('salary'))['t'] or 0)
+            s_sal   = float(Staff.objects.filter(school=school).aggregate(t=Sum('salary'))['t'] or 0)
+            rev_cost_rows.append({
+                'session':  session.session_name,
+                'Revenue':  revenue,
+                'Expenses': exp,
+                'Salaries': t_sal + s_sal,
+            })
+        if rev_cost_rows:
+            df  = pd.DataFrame(rev_cost_rows)
+            fig = px.line(
+                df, x='session', y=['Revenue', 'Expenses', 'Salaries'],
+                markers=True, template='plotly_white',
+                labels={'value': 'Amount (Rs)', 'session': '', 'variable': ''},
+                color_discrete_map={
+                    'Revenue':  '#43a047',
+                    'Expenses': '#ef5350',
+                    'Salaries': '#fb8c00',
+                },
+            )
+            fig.update_layout(
+                hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=-0.45, title=''),
+            )
+            chart_rev_vs_cost = _safe_html(fig)
+ 
+    # 8. Expense categories (horizontal bar)
+    chart_expense_cat = None
+    expense_cat = list(
+        expenses_qs.values('expense_name').annotate(total=Sum('price')).order_by('-total')
+    )
+    if expense_cat:
+        df  = pd.DataFrame(expense_cat)
+        df['total'] = df['total'].astype(float)
+        fig = px.bar(
+            df, y='expense_name', x='total', orientation='h',
+            template='plotly_white',
+            labels={'expense_name': '', 'total': 'Amount (Rs)'},
+            color='total', color_continuous_scale='Reds',
+        )
+        fig.update_layout(
+            yaxis={'categoryorder': 'total ascending'},
+            coloraxis_showscale=False,
+        )
+        chart_expense_cat = _safe_html(fig)
+ 
+    # 9. Expense type trend (Monthly vs Daily stacked bar over time)
+    chart_expense_trend = None
+    exp_trend = list(
+        expenses_qs
+        .annotate(m=TruncMonth('payment_date'))
+        .values('m', 'expense_type')
+        .annotate(total=Sum('price'))
+        .order_by('m', 'expense_type')
+    )
+    if exp_trend:
+        df = pd.DataFrame(exp_trend)
+        df['period'] = pd.to_datetime(df['m']).dt.strftime('%b %Y')
+        df['total']  = df['total'].astype(float)
+        fig = px.bar(
+            df, x='period', y='total', color='expense_type',
+            barmode='stack', template='plotly_white',
+            labels={'period': '', 'total': 'Amount (Rs)', 'expense_type': 'Type'},
+            color_discrete_map={'Monthly': '#1e88e5', 'Daily': '#fb8c00'},
+        )
+        fig.update_layout(
+            xaxis_tickangle=-30,
+            legend=dict(orientation='h', yanchor='bottom', y=-0.45, title=''),
+        )
+        chart_expense_trend = _safe_html(fig)
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION E — ACADEMIC CHARTS
+    # ──────────────────────────────────────────────────────────
+ 
+    # 10. Subject performance heatmap
+    chart_subject_heatmap = None
+    result_agg = list(
+        StudentResult.objects.filter(student_admission__in=admission_qs)
+        .exclude(total_marks=0)
+        .annotate(
+            pct=ExpressionWrapper(
+                F('obtained_marks') * 100.0 / F('total_marks'),
+                output_field=FloatField(),
+            )
+        )
+        .values('subject__name', 'student_admission__class_name')
+        .annotate(avg_pct=Avg('pct'))
+        .order_by('subject__name', 'student_admission__class_name')
+    )
+    if result_agg:
+        df = pd.DataFrame(result_agg)
+        df.columns = ['subject', 'class_name', 'avg_pct']
+        df['avg_pct'] = df['avg_pct'].round(1)
+        try:
+            pivot = df.pivot(index='subject', columns='class_name', values='avg_pct')
+            fig = px.imshow(
+                pivot,
+                labels=dict(x='Class', y='Subject', color='Avg %'),
+                color_continuous_scale='RdYlGn',
+                zmin=0, zmax=100,
+                text_auto='.1f',
+                template='plotly_white',
+                aspect='auto',
+            )
+            fig.update_layout(
+                margin=dict(l=10, r=10, t=20, b=60),
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(family='Segoe UI, system-ui, sans-serif', size=11),
+                xaxis_tickangle=-30,
+            )
+            chart_subject_heatmap = fig.to_html(full_html=False)
+        except Exception as e:
+            logger.warning("Heatmap pivot failed: %s", e)
+ 
+    # 11. Grade distribution bar
+    chart_grades = None
+    result_qs = StudentResult.objects.filter(student_admission__in=admission_qs)
+    if result_qs.exists():
+        grade_counts = {'A+': 0, 'A': 0, 'B': 0, 'C': 0, 'D': 0, 'F': 0}
+        for r in result_qs.only('obtained_marks', 'total_marks'):
+            g = r.grade
+            grade_counts[g] = grade_counts.get(g, 0) + 1
+        gdf = pd.DataFrame([
+            {'Grade': k, 'Count': v} for k, v in grade_counts.items() if v > 0
+        ])
+        if not gdf.empty:
+            order = ['A+', 'A', 'B', 'C', 'D', 'F']
+            gdf['Grade'] = pd.Categorical(gdf['Grade'], categories=order, ordered=True)
+            gdf = gdf.sort_values('Grade')
+            fig  = px.bar(
+                gdf, x='Grade', y='Count', template='plotly_white',
+                color='Grade',
+                color_discrete_map={
+                    'A+': '#1b5e20', 'A': '#43a047', 'B': '#1e88e5',
+                    'C':  '#fb8c00', 'D': '#ff7043', 'F': '#e53935',
+                },
+                text='Count',
+            )
+            fig.update_traces(textposition='outside')
+            fig.update_layout(showlegend=False)
+            chart_grades = _safe_html(fig)
+ 
+    # ──────────────────────────────────────────────────────────
+    # SECTION F — OPERATIONS CHARTS
+    # ──────────────────────────────────────────────────────────
+ 
+    # 12. Transport utilization (vehicle vs students)
+    chart_transport = None
+    transport_data  = list(
+        Transport.objects.filter(school=school)
+        .values('vehicle_number', 'route', 'number_of_students')
+        .order_by('-number_of_students')
+    )
+    if transport_data:
+        df = pd.DataFrame(transport_data)
+        df['label'] = df['vehicle_number'] + ' — ' + df['route'].str[:20]
+        # Students on paid transport in current session
+        paid_count  = admission_qs.filter(transport='Paid').count()
+        fig = px.bar(
+            df, x='label', y='number_of_students',
+            template='plotly_white',
+            labels={'label': '', 'number_of_students': 'Students'},
+            color='number_of_students', color_continuous_scale='Blues',
+            text='number_of_students',
+        )
+        fig.update_traces(textposition='outside')
+        fig.update_layout(
+            coloraxis_showscale=False,
+            xaxis_tickangle=-30,
+            annotations=[dict(
+                text=f'Total on paid transport this session: {paid_count}',
+                xref='paper', yref='paper', x=0, y=1.08,
+                showarrow=False,
+                font=dict(size=11, color='#546e7a'),
+            )],
+        )
+        chart_transport = _safe_html(fig)
+ 
+    # ──────────────────────────────────────────────────────────
+    # CUSTOM CHART (POST)
+    # ──────────────────────────────────────────────────────────
+    chart_html = None
     if request.method == 'POST' and form.is_valid():
         try:
             model_name = form.cleaned_data['model_name']
-            x_axis = form.cleaned_data['x_axis']
-            y_axis = form.cleaned_data['y_axis']
+            x_axis     = form.cleaned_data['x_axis']
+            y_axis     = form.cleaned_data['y_axis']
             chart_type = form.cleaned_data['chart_type']
-
-            model = apps.get_model('main_app', model_name)
+ 
+            model    = apps.get_model('main_app', model_name)
             queryset = model.objects.all()
-
-            # Safe filtering
             if hasattr(model, 'school'):
-                queryset = queryset.filter(school=user_school)
+                queryset = queryset.filter(school=school)
             elif hasattr(model, 'student_admission'):
-                queryset = queryset.filter(student_admission__student__school=user_school)
+                queryset = queryset.filter(student_admission__student__school=school)
             elif hasattr(model, 'student'):
-                queryset = queryset.filter(student__school=user_school)
-
-            if active_session and hasattr(model, 'academic_session'):
-                queryset = queryset.filter(academic_session=active_session)
-
-            # Get only requested fields safely
-            df = pd.DataFrame.from_records(
-                queryset.values(x_axis, y_axis)
-            ).dropna()
-
+                queryset = queryset.filter(student__school=school)
+            if sel_session and hasattr(model, 'academic_session'):
+                queryset = queryset.filter(academic_session=sel_session)
+ 
+            df = pd.DataFrame.from_records(queryset.values(x_axis, y_axis)).dropna()
             if df.empty:
-                chart_html = "<p class='alert alert-warning'>No data available for the selected fields.</p>"
+                chart_html = "<div class='alert alert-warning'>No data for these fields.</div>"
             elif df[x_axis].nunique() <= 1:
-                chart_html = "<p class='alert alert-warning'>Not enough variation in X-axis to generate chart.</p>"
+                chart_html = "<div class='alert alert-warning'>Not enough variation in X-axis.</div>"
             else:
-                if chart_type == 'bar':
-                    fig = px.bar(df, x=x_axis, y=y_axis)
-                elif chart_type == 'line':
-                    fig = px.line(df, x=x_axis, y=y_axis)
-                else:
-                    fig = px.scatter(df, x=x_axis, y=y_axis)
-
-                chart_html = fig.to_html()
-
-        except Exception as e:
-            chart_html = f"<p class='alert alert-danger'>Error generating chart: {str(e)}</p>"
-
+                fig_fn = {'bar': px.bar, 'line': px.line, 'scatter': px.scatter}.get(chart_type, px.bar)
+                chart_html = _safe_html(fig_fn(df, x=x_axis, y=y_axis, template='plotly_white'))
+        except Exception as exc:
+            chart_html = f"<div class='alert alert-danger'>Error: {exc}</div>"
+ 
     return render(request, 'main_app/analytics.html', {
-        'form': form,
-        'chart': chart_html,
-        'pie_chart': pie_chart,
-        'bar_chart': bar_chart,
-        'trend_chart': trend_chart,
-        'all_sessions': all_sessions,
-        'selected_session': active_session,
+        'form':                  form,
+        'chart':                 chart_html,
+        'all_sessions':          all_sessions,
+        'selected_session':      sel_session,
+        'progress_data':         progress_data,
+        'current_progress':      current_progress,
+        # Charts
+        'chart_progress_gauge':  chart_progress_gauge,
+        'chart_progress_trend':  chart_progress_trend,
+        'chart_student_dist':    chart_student_dist,
+        'chart_status':          chart_status,
+        'chart_retention':       chart_retention,
+        'chart_funnel':          chart_funnel,
+        'chart_fee_trend':       chart_fee_trend,
+        'chart_defaulters':      chart_defaulters,
+        'top_defaulters':        top_defaulters,
+        'chart_rev_vs_cost':     chart_rev_vs_cost,
+        'chart_expense_cat':     chart_expense_cat,
+        'chart_expense_trend':   chart_expense_trend,
+        'chart_subject_heatmap': chart_subject_heatmap,
+        'chart_grades':          chart_grades,
+        'chart_transport':       chart_transport,
     })
+ 
 
 
+# ── Session Analytics View (cross-session comparison) ────────
+ 
 @school_staff_required
 def session_analytics(request):
-    # 1️⃣ Get school for logged-in user
     if hasattr(request.user, 'school'):
         school = request.user.school
     elif hasattr(request.user, 'staff'):
         school = request.user.staff.school
     else:
-        logger.error(f"No school assigned to user {request.user}")
         return HttpResponseForbidden("No school assigned to this account.")
-
-    # 2️⃣ Get all sessions for this school
-    sessions = AcademicSession.objects.filter(school=school).order_by("start_date")
-    logger.debug(f"Found {sessions.count()} sessions for school {school}")
-
+ 
+    sessions     = AcademicSession.objects.filter(school=school).order_by('start_date')
     session_data = []
-
+ 
     for session in sessions:
-        start_date = session.start_date
-        end_date = session.end_date
-
-        # 📌 Total Students admitted in session
-        total_students = StudentAdmission.objects.filter(
-            student__school=school,
-            admission_date__range=[start_date, end_date]
-        ).count()
-
-        # 📌 Total Fee Collected
-        total_fee = MonthlyFee.objects.filter(
-            student_admission__student__school=school,
-            payment_date__range=[start_date, end_date]
-        ).aggregate(Sum('received'))['received__sum'] or 0
-
-        # 📌 Total Balance
-        total_balance = MonthlyFee.objects.filter(
-            student_admission__student__school=school,
-            payment_date__range=[start_date, end_date]
-        ).aggregate(Sum('current_balance'))['current_balance__sum'] or 0
-
-        # 📌 Teacher Salaries
-        total_teacher_salary = Teacher.objects.filter(
-            school=school
-        ).aggregate(Sum('salary'))['salary__sum'] or 0
-
-        # 📌 Staff Salaries
-        total_staff_salary = Staff.objects.filter(
-            school=school
-        ).aggregate(Sum('salary'))['salary__sum'] or 0
-
-        # 📌 Expenses
+        # FIX: use academic_session filter, not admission_date__range
+        admission_qs = StudentAdmission.objects.filter(
+            student__school  = school,
+            academic_session = session,
+            status           = True,
+        )
+        total_students = admission_qs.count()
+ 
+        # FIX: filter MonthlyFee by academic_session, not payment_date range
+        monthly_qs = MonthlyFee.objects.filter(
+            student_admission__academic_session = session,
+            student_admission__student__school  = school,
+        )
+ 
+        # received is per-month amount — summing is correct
+        total_fee = monthly_qs.aggregate(
+            total=Sum('received')
+        )['total'] or 0
+ 
+        # FIX: outstanding = sum of last month's balance per student
+        total_balance = annotate_outstanding(admission_qs).aggregate(
+            total=Sum('outstanding')
+        )['total'] or 0
+ 
+        teacher_salary = Teacher.objects.filter(school=school).aggregate(
+            total=Sum('salary')
+        )['total'] or 0
+ 
+        staff_salary = Staff.objects.filter(school=school).aggregate(
+            total=Sum('salary')
+        )['total'] or 0
+ 
         total_expenses = Expenses.objects.filter(
-            school=school,
-            payment_date__range=[start_date, end_date]
-        ).aggregate(Sum('price'))['price__sum'] or 0
-
-        # 📌 Assets Purchased (fixed: purchased_date)
+            school        = school,
+            payment_date__range = (session.start_date, session.end_date),
+        ).aggregate(total=Sum('price'))['total'] or 0
+ 
         total_assets = Assets.objects.filter(
-            school=school,
-            purchased_date__range=[start_date, end_date]
-        ).aggregate(Sum('value'))['value__sum'] or 0
-
+            school              = school,
+            purchased_date__range = (session.start_date, session.end_date),
+        ).aggregate(total=Sum('value'))['total'] or 0
+ 
         session_data.append({
-            "session": session.session_name,
-            "students": total_students,
-            "fee_collected": total_fee,
-            "balance": total_balance,
-            "teacher_salaries": total_teacher_salary,
-            "staff_salaries": total_staff_salary,
-            "expenses": total_expenses,
-            "assets": total_assets,
+            'session':         session.session_name,
+            'students':        total_students,
+            'fee_collected':   float(total_fee),
+            'balance':         float(total_balance),
+            'teacher_salaries': float(teacher_salary),
+            'staff_salaries':  float(staff_salary),
+            'expenses':        float(total_expenses),
+            'assets':          float(total_assets),
         })
-        logger.debug(f"Session {session.session_name}: students={total_students}, expenses={total_expenses}, assets={total_assets}")
-
-    # 3️⃣ Bar Chart
-    # 3️⃣ Bar Chart
+ 
     df = pd.DataFrame(session_data)
-
-    # Ensure numeric columns are float
-    numeric_cols = ["fee_collected", "teacher_salaries", "staff_salaries", "expenses", "assets"]
+ 
+    numeric_cols = ['fee_collected', 'teacher_salaries', 'staff_salaries', 'expenses', 'assets']
     for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(float)
-
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+ 
     bar_chart = px.bar(
-        df,
-        x="session",
-        y=numeric_cols,
-        barmode="group",
-        title="Session Comparison (Financial Metrics)"
-    )
-
-    # 4️⃣ Pie Charts
+        df, x='session', y=numeric_cols,
+        barmode='group', template='plotly_white',
+        labels={'value': 'Amount (Rs)', 'session': 'Session', 'variable': ''},
+    ).update_layout(
+        margin=dict(l=10, r=10, t=40, b=10),
+        legend=dict(orientation='h', yanchor='bottom', y=-0.35),
+        xaxis_tickangle=-30,
+    ).to_html(full_html=False)
+ 
+    student_trend = px.line(
+        df, x='session', y='students',
+        markers=True, template='plotly_white',
+        labels={'students': 'Student Count', 'session': 'Session'},
+    ).update_layout(
+        margin=dict(l=10, r=10, t=30, b=10),
+    ).to_html(full_html=False)
+ 
     pie_charts = {}
     for data in session_data:
         pie_df = pd.DataFrame({
-            "Category": ["Fee Collected", "Teacher Salaries", "Staff Salaries", "Expenses", "Assets"],
-            "Amount": [
-                data["fee_collected"],
-                data["teacher_salaries"],
-                data["staff_salaries"],
-                data["expenses"],
-                data["assets"]
-            ]
+            'Category': ['Fees Collected', 'Teacher Salaries', 'Staff Salaries', 'Expenses', 'Assets'],
+            'Amount':   [
+                data['fee_collected'], data['teacher_salaries'],
+                data['staff_salaries'], data['expenses'], data['assets'],
+            ],
         })
-        pie_charts[data["session"]] = px.pie(
-            pie_df,
-            names="Category",
-            values="Amount",
-            title=f"Proportions in {data['session']}"
-        )
-
-    context = {
-        "session_data": session_data,
-        "bar_chart": bar_chart.to_html(full_html=False),
-        "pie_charts": {k: v.to_html(full_html=False) for k, v in pie_charts.items()},
-        "sessions": sessions
-    }
-
-    return render(request, "main_app/session_analytics.html", context)
-
-
-
-
-
-
+        pie_df = pie_df[pie_df['Amount'] > 0]
+        if not pie_df.empty:
+            pie_charts[data['session']] = px.pie(
+                pie_df, names='Category', values='Amount',
+                hole=0.4, template='plotly_white',
+            ).update_layout(
+                margin=dict(l=10, r=10, t=30, b=10),
+                legend=dict(orientation='h', yanchor='bottom', y=-0.4),
+            ).to_html(full_html=False)
+ 
+    return render(request, 'main_app/session_analytics.html', {
+        'session_data':  session_data,
+        'bar_chart':     bar_chart,
+        'student_trend': student_trend,
+        'pie_charts':    pie_charts,
+        'sessions':      sessions,
+    })
+ 
+ 
 @school_staff_required
 def get_model_fields(request):
+    allowed = {'MonthlyFee', 'StudentAdmission', 'Student', 'StudentResult', 'Assets', 'Expenses'}
     model_name = request.GET.get('model_name')
-    try:
-        if model_name in ['MonthlyFee', 'StudentAdmission', 'Student', 'StudentResult', 'Assets', 'Expenses']:
-            model = apps.get_model('main_app', model_name)
-            fields = [field.name for field in model._meta.fields if not field.is_relation]
+    if model_name in allowed:
+        try:
+            model  = apps.get_model('main_app', model_name)
+            fields = [f.name for f in model._meta.fields if not f.is_relation]
             return JsonResponse({'fields': fields})
-        else:
-            return JsonResponse({'fields': []})
-    except LookupError:
-        return JsonResponse({'error': 'Model not found'}, status=400)
+        except LookupError:
+            return JsonResponse({'error': 'Model not found'}, status=400)
+    return JsonResponse({'fields': []})
 
-#----------------------------Statistics--------------------------------
+# ── Statistics View (current session snapshot) ────────────────
  
 @school_staff_required
 def statistics_view(request):
-    school = request.user.school
+    """
+    Fast at-a-glance snapshot for the currently active session.
+    All numbers are session-scoped and consistent with each other.
+    """
+    school         = request.user.school
     active_session = AcademicSession.objects.filter(school=school, is_active=True).first()
-
-    # Basic counts
-    total_students = Student.objects.filter(school=school).count()
-    new_admissions = StudentAdmission.objects.filter(student__school=school, academic_session=active_session).count()
-
-    total_collected = MonthlyFee.objects.filter(student_admission__student__school=school).aggregate(
+ 
+    # ── Student counts (all session-scoped) ───────────────────
+    admission_qs = StudentAdmission.objects.filter(
+        student__school      = school,
+        academic_session     = active_session,
+        status               = True,
+    ) if active_session else StudentAdmission.objects.none()
+ 
+    student_stats = admission_qs.aggregate(
+        total_students        = Count('id'),
+        new_admissions        = Count('id', filter=Q(promoted_from__isnull=True)),
+        promoted_count        = Count('id', filter=Q(promoted=True)),
+        not_promoted_count    = Count('id', filter=Q(promoted_from__isnull=False, promoted=False)),
+        transport_paid_count  = Count('id', filter=Q(transport='Paid')),
+        transport_free_count  = Count('id', filter=Q(transport='Free')),
+    )
+ 
+    # ── Fee totals ────────────────────────────────────────────
+    # FIX: use annotate_outstanding to get correct per-student
+    # outstanding, then sum those — NOT Sum('current_balance').
+    outstanding_qs = annotate_outstanding(admission_qs)
+    total_outstanding = outstanding_qs.aggregate(
+        total=Sum('outstanding')
+    )['total'] or Decimal('0.00')
+ 
+    monthly_fee_qs = MonthlyFee.objects.filter(
+        student_admission__academic_session = active_session,
+        student_admission__student__school  = school,
+    ) if active_session else MonthlyFee.objects.none()
+ 
+    # received is per-month amount (not cumulative) — summing is correct
+    total_received = monthly_fee_qs.aggregate(
         total=Sum('received')
     )['total'] or Decimal('0.00')
-
-    total_balance = MonthlyFee.objects.filter(student_admission__student__school=school).aggregate(
-        total=Sum('current_balance')
+ 
+    # admission-time received (one-time charges collected at admission)
+    admission_received = admission_qs.aggregate(
+        total=Sum('received')
     )['total'] or Decimal('0.00')
-
-    teacher_salaries = Teacher.objects.filter(school=school).aggregate(
+ 
+    total_collected = total_received + admission_received
+ 
+    # Collection rate
+    total_billed = admission_qs.aggregate(
+        total=Sum('total_dues')
+    )['total'] or Decimal('0.00')
+    total_monthly_billed = monthly_fee_qs.aggregate(
+        total=Sum(F('monthly_fee') + F('transport_fee'))
+    )['total'] or Decimal('0.00')
+    gross_billed = total_billed + total_monthly_billed
+    collection_rate = round(
+        float(total_collected) / float(gross_billed) * 100, 1
+    ) if gross_billed > 0 else 0.0
+ 
+    # ── School-wide financials ────────────────────────────────
+    teacher_salary = Teacher.objects.filter(school=school).aggregate(
         total=Sum('salary')
     )['total'] or Decimal('0.00')
-
-    staff_salaries = Staff.objects.filter(school=school).aggregate(
+ 
+    staff_salary = Staff.objects.filter(school=school).aggregate(
         total=Sum('salary')
     )['total'] or Decimal('0.00')
-
-    total_expenses = Expenses.objects.filter(school=school).aggregate(
+ 
+    expenses_qs = Expenses.objects.filter(school=school)
+    if active_session:
+        expenses_qs = expenses_qs.filter(
+            payment_date__range=(active_session.start_date, active_session.end_date)
+        )
+    total_expenses = expenses_qs.aggregate(
         total=Sum('price')
     )['total'] or Decimal('0.00')
-
-    total_assets_value = Assets.objects.filter(school=school).aggregate(
+ 
+    assets_qs = Assets.objects.filter(school=school)
+    if active_session:
+        assets_qs = assets_qs.filter(
+            purchased_date__range=(active_session.start_date, active_session.end_date)
+        )
+    total_assets = assets_qs.aggregate(
         total=Sum('value')
     )['total'] or Decimal('0.00')
-
-    # Summary per class (top bar summary)
-    summary_qs = StudentAdmission.objects.filter(
-        student__school=school,
-        academic_session=active_session
-    ).values('class_name').annotate(count=Count('student')).order_by('class_name')
-
-    summary_data = list(summary_qs)
-
-    # Plotly bar chart
-    fig = px.bar(
-        summary_data,
-        x='class_name',
-        y='count',
-        title='Students by Class',
-        labels={'class_name': 'Class', 'count': 'Student Count'},
-        template='plotly_white',
-        color='count'
+ 
+    # ── Class/section summary ─────────────────────────────────
+    class_summary = (
+        admission_qs
+        .values('class_name', 'section')
+        .annotate(count=Count('id'))
+        .order_by('class_name', 'section')
     )
-    plot_div = fig.to_html(full_html=False)
-
-    # Context to template
-    context = {
-        "cards": [
-            {"title": "Total Students", "value": total_students, "color": "primary"},
-            {"title": "New Admissions", "value": new_admissions, "color": "success"},
-            {"title": "Total Fee Collected", "value": f"Rs {total_collected:,.0f}", "color": "info"},
-            {"title": "Total Student Balance", "value": f"Rs {total_balance:,.0f}", "color": "warning"},
-            {"title": "Teacher Salaries", "value": f"Rs {teacher_salaries:,.0f}", "color": "secondary"},
-            {"title": "Staff Salaries", "value": f"Rs {staff_salaries:,.0f}", "color": "dark"},
-            {"title": "Total Expenses", "value": f"Rs {total_expenses:,.0f}", "color": "danger"},
-            {"title": "Total Assets", "value": f"Rs {total_assets_value:,.0f}", "color": "primary"},
-        ],
-        "class_summary": summary_data,
-        "plot_div": plot_div,
-    }
-
-    return render(request, 'main_app/statistics.html', context)
+ 
+    # ── Student distribution chart ────────────────────────────
+    class_totals = (
+        admission_qs
+        .values('class_name')
+        .annotate(count=Count('id'))
+        .order_by('class_name')
+    )
+    plot_div = None
+    if class_totals:
+        df = pd.DataFrame(list(class_totals))
+        fig = px.bar(
+            df, x='class_name', y='count',
+            labels={'class_name': 'Class', 'count': 'Students'},
+            color='count',
+            color_continuous_scale='Redor',  # or any other color scale you prefer
+            template='plotly_white',
+        )
+        fig.update_layout(
+            margin=dict(l=20, r=20, t=30, b=20),
+            showlegend=False,
+            coloraxis_showscale=False,
+        )
+        plot_div = fig.to_html(full_html=False)
+ 
+    return render(request, 'main_app/statistics.html', {
+        'active_session':      active_session,
+        'student_stats':       student_stats,
+        'total_outstanding':   total_outstanding,
+        'total_collected':     total_collected,
+        'gross_billed':        gross_billed,
+        'collection_rate':     collection_rate,
+        'teacher_salary':      teacher_salary,
+        'staff_salary':        staff_salary,
+        'total_expenses':      total_expenses,
+        'total_assets':        total_assets,
+        'class_summary':       class_summary,
+        'plot_div':            plot_div,
+    })
 
 #-------------------------Backup----------------------------------
 @school_staff_required
