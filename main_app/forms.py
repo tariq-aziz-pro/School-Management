@@ -1,6 +1,8 @@
+import re
+
 from django import forms
-from django.contrib.auth.forms import UserCreationForm
-from .models import CustomUser, School, FeeStructure, AcademicSession, StudentAdmission, MonthlyFee, CLASS_CHOICES, SECTION_CHOICES, Student, SchoolSubscription, Subject, StudentResult, Teacher, Student, TemporaryPassword, Syllabus, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
+from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
+from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
@@ -9,13 +11,16 @@ from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 import datetime
 from django.core.exceptions import ValidationError
-from django.contrib.auth.hashers import make_password
-from django.contrib.auth.forms import UserCreationForm
-import re
+from .models import CustomUser, School, FeeStructure, AcademicSession, StudentAdmission, MonthlyFee, CLASS_CHOICES, SECTION_CHOICES, Student, SchoolSubscription, Subject, StudentResult, Teacher, Student, TemporaryPassword, Syllabus, Staff, Assets, Expenses, Transport, Events, CLASS_PROGRESSION
 import logging
 from django.apps import apps
 from .utils import calculate_total_dues, validate_transport, get_pending_balance
 from .view_helpers import next_available_roll
+from .permissions import (
+    SCHOOL_STAFF_TYPES,
+    USER_TYPE_STUDENT,
+    USER_TYPE_TEACHER,
+)
 
 
 
@@ -24,6 +29,71 @@ from .view_helpers import next_available_roll
 logger = logging.getLogger(__name__)
 
 
+class LoginForm(AuthenticationForm):
+    """Adds a role tab (Staff / Teacher / Student) that must match the account type."""
+
+    ROLE_STAFF = 'staff'
+    ROLE_TEACHER = 'teacher'
+    ROLE_STUDENT = 'student'
+
+    ROLE_CHOICES = (
+        (ROLE_STAFF, 'Staff'),
+        (ROLE_TEACHER, 'Teacher'),
+        (ROLE_STUDENT, 'Student'),
+    )
+
+    ROLE_USER_TYPES = {
+        ROLE_STAFF: SCHOOL_STAFF_TYPES,      # {1, 2, 3} -> Admin, Operator, Owner
+        ROLE_TEACHER: {USER_TYPE_TEACHER},   # {4}
+        ROLE_STUDENT: {USER_TYPE_STUDENT},   # {5}
+    }
+
+    role = forms.ChoiceField(
+        choices=ROLE_CHOICES,
+        widget=forms.HiddenInput(),
+        required=True,
+        error_messages={'required': 'Please choose Staff, Teacher, or Student before signing in.'},
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['username'].label = 'Username'
+        self.fields['username'].help_text = 'Use the username created for your school portal.'
+        self.fields['username'].widget.attrs.update({
+            'class': 'form-control',
+            'placeholder': 'Enter your username',
+            'autocomplete': 'username',
+            'autofocus': 'autofocus',
+        })
+        self.fields['password'].widget.attrs.update({
+            'class': 'form-control',
+            'placeholder': 'Enter your password',
+            'autocomplete': 'current-password',
+        })
+
+    def clean(self):
+        if self.data is not None:
+            mutable = self.data.copy()
+            if mutable.get('username') is not None:
+                mutable['username'] = str(mutable.get('username', '')).strip()
+            if mutable.get('password') is not None:
+                mutable['password'] = str(mutable.get('password', '')).strip()
+            self.data = mutable
+
+        cleaned_data = super().clean()  # authenticates username/password, sets self.user_cache
+
+        role = cleaned_data.get('role')
+        user = self.user_cache
+        if user is not None and role:
+            allowed_types = self.ROLE_USER_TYPES.get(role, set())
+            if getattr(user, 'user_type', None) not in allowed_types:
+                role_label = dict(self.ROLE_CHOICES).get(role, role)
+                self.user_cache = None  # block get_user() from returning this account
+                raise forms.ValidationError(
+                    f"This is not a {role_label} account. Please choose the correct tab and try again.",
+                    code='role_mismatch',
+                )
+        return cleaned_data
 
 ALLOWED_MODELS = ['MonthlyFee', 'StudentAdmission', 'Student', 'StudentResult', 'Assets', 'Expenses']
 
@@ -120,53 +190,58 @@ TRANSPORT_CHOICES = [
 ]
 
 
-class StudentUserForm(forms.ModelForm):
-    student_id = forms.ChoiceField(choices=[], widget=forms.Select(attrs={'class': 'form-control'}), help_text="Select a student ID.")
-
-    class Meta:
-        model = CustomUser
-        fields = ['student_id']
+class StudentUserForm(forms.Form):
+    student_id = forms.ChoiceField(
+        choices=[],
+        widget=forms.Select(attrs={'class': 'form-control'}),
+        help_text="Select a student ID.",
+    )
 
     def __init__(self, *args, school=None, **kwargs):
         super().__init__(*args, **kwargs)
         if school:
-            # Students without accounts
-            students = Student.objects.filter(school=school).exclude(student_id__in=CustomUser.objects.filter(user_type=5).values('username'))
+            existing = CustomUser.objects.filter(
+                school=school, user_type=5
+            ).values_list('username', flat=True)
+            students = Student.objects.filter(school=school).exclude(
+                student_id__in=existing
+            )
             choices = [(s.student_id, s.student_id) for s in students]
             self.fields['student_id'].choices = choices
-            logger.debug(f"StudentUserForm choices for school {school}: {choices}")  # Debug choices
+            logger.debug(f"StudentUserForm choices for school {school}: {choices}")
 
     def clean_student_id(self):
         student_id = self.cleaned_data.get('student_id')
         if not student_id:
             raise forms.ValidationError("Student ID is required.")
         if student_id not in [choice[0] for choice in self.fields['student_id'].choices]:
-            raise forms.ValidationError(f"{student_id} is not a valid choice. Ensure the student exists and has no account.")
+            raise forms.ValidationError(
+                f"{student_id} is not a valid choice. Ensure the student exists and has no account."
+            )
         if CustomUser.objects.filter(username=student_id).exists():
             raise forms.ValidationError("This student ID is already in use as a username.")
         if not Student.objects.filter(student_id=student_id).exists():
             raise forms.ValidationError("Invalid student ID. Student must exist in the system.")
         return student_id
 
-    def save(self, commit=True):
-        logger.debug(f"Saving StudentUserForm: StudentID={self.cleaned_data.get('student_id')}")
-        user = super().save(commit=False)
-        user.username = self.cleaned_data['student_id']
-        user.user_type = 5  # Student
-        user.is_active = True
-        plain_password = TemporaryPassword.generate_password()
-        user.set_password(plain_password)
-        if commit:
-            try:
-                user.save()
-                student = Student.objects.get(student_id=self.cleaned_data['student_id'])
-                user.school = student.school
-                user.save()
-                TemporaryPassword.objects.create(user=user, password=plain_password)
-                logger.info(f"Student account created: Username={user.username}, School={user.school.school_name}")
-            except Exception as e:
-                logger.error(f"Error saving student user: {str(e)}")
-                raise
+    def save(self, *, school):
+        from django.db import transaction
+
+        student_id = self.cleaned_data['student_id']
+        logger.debug(f"Saving StudentUserForm: StudentID={student_id}")
+        student = Student.objects.get(student_id=student_id, school=school)
+
+        with transaction.atomic():
+            user = CustomUser(
+                username=student_id,
+                user_type=5,
+                is_active=True,
+                school=student.school,
+            )
+            plain_password = TemporaryPassword.assign_to_user(user)
+            logger.info(
+                f"Student account created: Username={user.username}, School={user.school.school_name}"
+            )
         return user, plain_password
 
 class SchoolSubscriptionForm(forms.ModelForm):
@@ -191,36 +266,59 @@ class SchoolSubscriptionForm(forms.ModelForm):
 
 
 class SchoolRegisterForm(UserCreationForm):
-    school_name = forms.CharField(max_length=200, widget=forms.TextInput(attrs={'class': 'form-control'}))
+    school_name = forms.CharField(max_length=200, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Enter school name'}))
     school_logo = forms.ImageField(required=False, widget=forms.FileInput(attrs={'class': 'form-control'}))
-    city = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control'}))
-    owner_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control'}))
-    contact_number = forms.CharField(max_length=15, widget=forms.TextInput(attrs={'class': 'form-control'}), help_text="Enter a valid phone number (10-15 digits, e.g., +923001234567).")
+    city = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'City'}))
+    owner_name = forms.CharField(max_length=100, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Owner / Principal name'}))
+    contact_number = forms.CharField(max_length=15, widget=forms.TextInput(attrs={'class': 'form-control', 'placeholder': '+923001234567'}), help_text="Enter a valid phone number (10-15 digits, e.g., +923001234567).")
     number_of_students = forms.IntegerField(min_value=0, initial=0, widget=forms.NumberInput(attrs={'class': 'form-control'}))
-    email = forms.EmailField(widget=forms.EmailInput(attrs={'class': 'form-control'}))
+    email = forms.EmailField(widget=forms.EmailInput(attrs={'class': 'form-control', 'placeholder': 'admin@example.com'}))
 
     class Meta:
         model = CustomUser
         fields = ['username', 'email', 'password1', 'password2', 'school_name', 'school_logo', 'city', 'owner_name', 'contact_number', 'number_of_students']
         widgets = {
-            'username': forms.TextInput(attrs={'class': 'form-control'}),
-            'password1': forms.PasswordInput(attrs={'class': 'form-control'}),
-            'password2': forms.PasswordInput(attrs={'class': 'form-control'}),
+            'username': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Choose a username'}),
+            'password1': forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Create a password'}),
+            'password2': forms.PasswordInput(attrs={'class': 'form-control', 'placeholder': 'Repeat password'}),
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['username'].widget.attrs.update({'autocomplete': 'username'})
+        self.fields['password1'].help_text = 'Use at least 8 characters and mix letters with numbers.'
+        self.fields['password2'].help_text = 'Re-enter the password to confirm it.'
+
     def clean_username(self):
-        username = self.cleaned_data.get('username')
+        username = (self.cleaned_data.get('username') or '').strip()
         if len(username) < 1:
             raise forms.ValidationError("Username cannot be empty.")
         if len(username) > 150:
             raise forms.ValidationError("Username cannot exceed 150 characters.")
-        if CustomUser.objects.filter(username=username).exists():
+        if not re.fullmatch(r'[\w.@+-]+', username):
+            raise forms.ValidationError("Only letters, numbers, and @ . + - _ are allowed in the username.")
+        if CustomUser.objects.filter(username__iexact=username).exists():
             raise forms.ValidationError("This username is already taken.")
         return username
 
+    def clean_password1(self):
+        password1 = self.cleaned_data.get('password1')
+        if password1:
+            if len(password1) < 8:
+                raise forms.ValidationError('Password must be at least 8 characters long.')
+            if password1.isalpha() or password1.isdigit():
+                raise forms.ValidationError('Password should include both letters and numbers.')
+            try:
+                validate_password(password1, self.instance)
+            except ValidationError as exc:
+                raise forms.ValidationError(list(exc.messages)) from exc
+        return password1
+
     def clean_contact_number(self):
-        contact_number = self.cleaned_data.get('contact_number')
-        if not re.match(r'^\+?\d{10,15}$', contact_number):
+        contact_number = (self.cleaned_data.get('contact_number') or '').strip()
+        if not contact_number:
+            raise forms.ValidationError("Contact number is required.")
+        if not re.fullmatch(r'^\+?\d{10,15}$', contact_number):
             raise forms.ValidationError("Enter a valid phone number (10-15 digits, optional '+' prefix).")
         return contact_number
 
@@ -231,8 +329,8 @@ class SchoolRegisterForm(UserCreationForm):
         return school_name
 
     def clean_email(self):
-        email = self.cleaned_data.get('email')
-        if CustomUser.objects.filter(email=email).exists():
+        email = (self.cleaned_data.get('email') or '').strip().lower()
+        if CustomUser.objects.filter(email__iexact=email).exists():
             raise forms.ValidationError("This email address is already in use.")
         return email
 
@@ -1158,6 +1256,22 @@ class TeacherForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.request = kwargs.pop('request', None)
         super().__init__(*args, **kwargs)
+
+        self.fields['username'].widget.attrs.update({
+            'class': 'form-control',
+            'placeholder': 'Choose a username',
+            'autocomplete': 'username',
+        })
+        self.fields['password'].widget.attrs.update({
+            'class': 'form-control',
+            'placeholder': 'Leave blank to auto-generate a secure password',
+            'autocomplete': 'new-password',
+        })
+        self.fields['confirm_password'].widget.attrs.update({
+            'class': 'form-control',
+            'placeholder': 'Confirm password',
+            'autocomplete': 'new-password',
+        })
  
         if self.request and self.request.user.school:
             school = self.request.user.school
@@ -1191,6 +1305,9 @@ class TeacherForm(forms.ModelForm):
         cleaned_data = super().clean()
         class_name = cleaned_data.get('class_name')
         section    = cleaned_data.get('section')
+
+        if cleaned_data.get('username'):
+            cleaned_data['username'] = str(cleaned_data['username']).strip()
  
         if class_name and section and self.request:
             # ── FIX: runs on BOTH create AND edit ────────────
@@ -1214,7 +1331,8 @@ class TeacherForm(forms.ModelForm):
         confirm_password = cleaned_data.get('confirm_password')
         if not self.instance.pk:
             if not password:
-                self.add_error('password', 'Password is required for a new teacher.')
+                cleaned_data['password'] = TemporaryPassword.generate_password(10)
+                cleaned_data['confirm_password'] = cleaned_data['password']
             elif password != confirm_password:
                 self.add_error('confirm_password', 'Passwords do not match.')
         elif password and password != confirm_password:
@@ -1251,6 +1369,7 @@ class TeacherForm(forms.ModelForm):
     def save(self, commit=True):
         teacher = super().save(commit=False)
         teacher.school = self.request.user.school
+        generated_password = None
 
         if commit:
             if self.instance.pk and self.instance.user:
@@ -1260,7 +1379,8 @@ class TeacherForm(forms.ModelForm):
                     user.set_password(self.cleaned_data['password'])
                 user.save()
             else:
-                password = self.cleaned_data.get('password')
+                password = self.cleaned_data.get('password') or TemporaryPassword.generate_password(10)
+                generated_password = password
                 user = CustomUser.objects.create_user(
                     username=self.cleaned_data['username'],
                     password=password,
@@ -1272,6 +1392,7 @@ class TeacherForm(forms.ModelForm):
             teacher.save()
             self.save_m2m()
 
+        self.generated_password = generated_password
         return teacher
 
 class StudentResultForm(forms.ModelForm):
@@ -1296,7 +1417,8 @@ class StudentResultForm(forms.ModelForm):
                 student__school=self.teacher.school,
                 class_name=self.teacher.class_name,
                 section=self.teacher.section,
-                academic_session__is_active=True
+                academic_session__is_active=True,
+                status=True,
             )
             self.fields['subject'].queryset = self.teacher.subjects.all()
         for field in self.fields:
@@ -1328,6 +1450,19 @@ class StudentResultForm(forms.ModelForm):
             raise forms.ValidationError(
             "Obtained marks cannot exceed the sum of theory and practical marks."
             )
+
+        if self.teacher:
+            student_admission = cleaned_data.get('student_admission')
+            subject = cleaned_data.get('subject')
+            if student_admission and (
+                student_admission.student.school_id != self.teacher.school_id
+                or student_admission.class_name != self.teacher.class_name
+                or student_admission.section != self.teacher.section
+                or not student_admission.status
+            ):
+                raise forms.ValidationError("Selected student is not in your active class.")
+            if subject and not self.teacher.subjects.filter(pk=subject.pk).exists():
+                raise forms.ValidationError("You are not assigned to teach this subject.")
 
         return cleaned_data
 
@@ -1432,77 +1567,87 @@ class StaffForm(forms.ModelForm):
 
 class AssetsForm(forms.ModelForm):
     class Meta:
-        model = Assets
-        fields = ['name', 'purchased_date', 'file_number', 'value', 
-                  'purchased_by', 'description', 'condition']
+        model  = Assets
+        fields = [
+            'name', 'purchased_date', 'file_number',
+            'value', 'purchased_by', 'description', 'condition',
+        ]
         widgets = {
-            'purchased_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'description': forms.Textarea(attrs={'rows': 4, 'class': 'form-control'}),
-            'name': forms.TextInput(attrs={'class': 'form-control'}),
-            'file_number': forms.TextInput(attrs={'class': 'form-control'}),
-            'value': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'purchased_date': forms.DateInput(
+                attrs={'type': 'date', 'class': 'form-control'}
+            ),
+            'description': forms.Textarea(
+                attrs={'rows': 3, 'class': 'form-control'}
+            ),
+            'name':         forms.TextInput(attrs={'class': 'form-control'}),
+            'file_number':  forms.TextInput(attrs={'class': 'form-control'}),
+            'value':        forms.NumberInput(
+                attrs={'class': 'form-control', 'step': '0.01', 'min': '0'}
+            ),
             'purchased_by': forms.TextInput(attrs={'class': 'form-control'}),
-            'condition': forms.Select(attrs={'class': 'form-control'}),
+            'condition':    forms.Select(attrs={'class': 'form-control'}),
         }
-
+ 
     def __init__(self, *args, **kwargs):
         self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-
-        if self.user and self.user.school:
-            self.instance.school = self.user.school
-
-        # Set default date
+ 
+        # Default date for new records
         if not self.instance.pk:
             self.initial['purchased_date'] = timezone.now().date()
-
-        # Force exclude any unwanted fields (extra safety)
-        if 'month_name' in self.fields:
-            del self.fields['month_name']
-
+ 
+        # file_number is optional after removing unique constraint
+        self.fields['file_number'].required = False
+ 
     def clean(self):
         cleaned_data = super().clean()
-        
+ 
+        # Only check that the user has a school — assets are NOT
+        # session-scoped, so we never block on "no active session".
         if not self.user or not self.user.school:
-            raise forms.ValidationError("User must be associated with a school.")
-
-        if not AcademicSession.objects.filter(school=self.user.school, is_active=True).exists():
-            raise forms.ValidationError("No active academic session found for this school.")
-
+            raise forms.ValidationError(
+                "Your account is not associated with a school."
+            )
+ 
         return cleaned_data
+ 
+    def save(self, commit=True):
+        asset = super().save(commit=False)
+        # Always stamp the school from the logged-in user
+        if self.user and self.user.school:
+            asset.school = self.user.school
+        if commit:
+            asset.save()
+        return asset
 
 
-
-# Define choices
-MONTH_CHOICES = [
-    ('January', 'January'), ('February', 'February'), ('March', 'March'),
-    ('April', 'April'), ('May', 'May'), ('June', 'June'),
-    ('July', 'July'), ('August', 'August'), ('September', 'September'),
-    ('October', 'October'), ('November', 'November'), ('December', 'December'),
-]
-
-DAY_CHOICES = [
-    ('Monday', 'Monday'), ('Tuesday', 'Tuesday'), ('Wednesday', 'Wednesday'),
-    ('Thursday', 'Thursday'), ('Friday', 'Friday'), ('Saturday', 'Saturday'),
-    ('Sunday', 'Sunday'),
-]
 
 class ExpensesForm(forms.ModelForm):
-    # Make period dynamic based on expense_type
     period = forms.ChoiceField(
-        choices=[],  # Will be set dynamically
+        choices=[], 
         required=True,
-        widget=forms.Select(attrs={'class': 'form-control'})
+        widget=forms.Select(attrs={'class': 'form-control'}),
     )
 
     class Meta:
         model = Expenses
-        fields = ['expense_type', 'expense_name', 'price', 'payment_date', 
-                  'payment_by', 'file_number', 'period', 'description']
+        fields = [
+            'expense_type', 'expense_name', 'price', 'payment_date',
+            'payment_by', 'file_number', 'period', 'description'
+        ]
         widgets = {
-            'payment_date': forms.DateInput(attrs={'type': 'date', 'class': 'form-control'}),
-            'description': forms.Textarea(attrs={'rows': 4, 'class': 'form-control'}),
-            'price': forms.NumberInput(attrs={'class': 'form-control', 'step': '0.01'}),
+            'payment_date': forms.DateInput(attrs={
+                'type': 'date', 
+                'class': 'form-control'
+            }),
+            'description': forms.Textarea(attrs={
+                'rows': 4, 
+                'class': 'form-control'
+            }),
+            'price': forms.NumberInput(attrs={
+                'class': 'form-control', 
+                'step': '0.01'
+            }),
             'payment_by': forms.TextInput(attrs={'class': 'form-control'}),
             'file_number': forms.TextInput(attrs={'class': 'form-control'}),
             'expense_type': forms.Select(attrs={'class': 'form-control'}),
@@ -1513,32 +1658,48 @@ class ExpensesForm(forms.ModelForm):
         self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
 
+        # Associate expense with user's school
         if self.user and self.user.school:
             self.instance.school = self.user.school
 
+        # Set default payment date for new records
         if not self.instance.pk:
-            self.initial['payment_date'] = timezone.now().date()
+            self.initial.setdefault('payment_date', timezone.now().date())
 
-        # Set period choices based on expense_type
-        expense_type = self.data.get('expense_type') or (self.instance.expense_type if self.instance.pk else 'Monthly')
+        # ==================== DYNAMIC CHOICES LOGIC ====================
+        # Priority: POST data > existing instance > default
+        expense_type = (
+            self.data.get('expense_type') if self.data else None
+            or getattr(self.instance, 'expense_type', None)
+            or 'Monthly'
+        )
 
+        # Update choices and labels based on expense type
         if expense_type == 'Daily':
-            self.fields['period'].choices = DAY_CHOICES
+            self.fields['expense_name'].choices = Expenses.DAILY_NAME_CHOICES
+            self.fields['period'].choices = Expenses.DAY_CHOICES
             self.fields['period'].label = "Day Name"
         else:
-            self.fields['period'].choices = MONTH_CHOICES
+            self.fields['expense_name'].choices = Expenses.MONTHLY_NAME_CHOICES
+            self.fields['period'].choices = Expenses.MONTH_CHOICES
             self.fields['period'].label = "Month Name"
 
+        # Preserve period value when editing
+        if self.instance.pk and self.instance.period:
+            self.initial['period'] = self.instance.period
+
     def clean(self):
-        cleaned_data = super().clean()
-        
+        cleaned = super().clean()
+
         if not self.user or not self.user.school:
-            raise forms.ValidationError("User must be associated with a school.")
+            raise ValidationError("User must be associated with a school.")
 
-        if not AcademicSession.objects.filter(school=self.user.school, is_active=True).exists():
-            raise forms.ValidationError("No active academic session found for this school.")
+        if not AcademicSession.objects.filter(
+            school=self.user.school, is_active=True
+        ).exists():
+            raise ValidationError("No active academic session found for this school.")
 
-        return cleaned_data
+        return cleaned
 
 
 class TransportForm(forms.ModelForm):

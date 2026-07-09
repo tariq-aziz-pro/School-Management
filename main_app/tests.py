@@ -6,7 +6,31 @@ from .models import (
     CustomUser, School, AcademicSession, Student, StudentAdmission,
     MonthlyFee, FeeStructure
 )
+from .forms import LoginForm, SchoolRegisterForm
 from .view_helpers import bulk_promote_students
+
+
+class AuthFormTests(TestCase):
+    def test_school_registration_rejects_weak_password(self):
+        form = SchoolRegisterForm(data={
+            'username': 'adminuser',
+            'email': 'admin@example.com',
+            'password1': '1234567',
+            'password2': '1234567',
+            'school_name': 'Bright Stars School',
+            'city': 'Lahore',
+            'owner_name': 'Ali Khan',
+            'contact_number': '+923001234567',
+            'number_of_students': 100,
+        })
+
+        self.assertFalse(form.is_valid())
+        self.assertIn('password1', form.errors)
+
+    def test_login_form_trims_username_and_password(self):
+        form = LoginForm(data={'username': ' admin ', 'password': ' secret '})
+        self.assertEqual(form.data['username'], 'admin')
+        self.assertEqual(form.data['password'], 'secret')
 
 
 class PromotionIntegrationTest(TestCase):

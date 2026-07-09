@@ -105,18 +105,36 @@
                         <td>{{ student.section }}</td>
                         <td>{{ student.username|default:"—" }}</td>
                         <td>
-                            <span class="text-muted small">{{ student.password|default:"—" }}</span>
+                            {% if student.account_status == 'Created' %}
+                                <code class="user-select-all small">{{ student.password }}</code>
+                            {% else %}
+                                <span class="text-muted small">—</span>
+                            {% endif %}
                         </td>
                         <td>
                             <span class="badge bg-{% if student.account_status == 'Created' %}success{% else %}warning{% endif %}">
                                 {{ student.account_status }}
                             </span>
                         </td>
-                        <td class="text-end">
+                        <td class="text-end text-nowrap">
                             {% if student.account_status != 'Created' %}
-                                <a href="{% url 'student_user_create' %}" class="btn btn-sm btn-outline-primary">
+                                <a href="{% url 'student_user_create' %}" class="btn btn-sm btn-outline-primary" title="Create account">
                                     <i class="fas fa-key"></i>
                                 </a>
+                            {% else %}
+                                <button type="button" class="btn btn-sm btn-outline-secondary copy-creds-btn"
+                                        data-username="{{ student.username }}"
+                                        data-password="{{ student.password }}"
+                                        title="Copy username and password">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                                <form method="post" action="{% url 'reset_student_password' student.student_id %}" class="d-inline"
+                                      onsubmit="return confirm('Reset password for {{ student.username }}?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-warning" title="Reset password">
+                                        <i class="fas fa-redo"></i>
+                                    </button>
+                                </form>
                             {% endif %}
                         </td>
                     </tr>
@@ -170,4 +188,26 @@
 
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll('.copy-creds-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var text = 'Username: ' + btn.dataset.username + '\nPassword: ' + btn.dataset.password;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-success');
+                setTimeout(function () {
+                    btn.classList.add('btn-outline-secondary');
+                    btn.classList.remove('btn-success');
+                }, 1500);
+            });
+        } else {
+            window.prompt('Copy login details:', text);
+        }
+    });
+});
+</script>
 {% endblock %}

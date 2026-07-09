@@ -46,6 +46,7 @@ urlpatterns = [
     # ─── Student ──────────────────────────────────────────────────────────────
     path('student/create/', views.student_user_create, name='student_user_create'),
     path('student/list/', views.student_list, name='student_list'),
+    path('student/reset-password/<str:student_id>/', views.reset_student_password, name='reset_student_password'),
     path('student/dashboard/', views.student_dashboard, name='student_dashboard'),
     path('student/edit/<str:student_id>/', views.edit_student, name='edit_student'),
     path('results/pdf/', views.generate_results_pdf, name='generate_results_pdf'),

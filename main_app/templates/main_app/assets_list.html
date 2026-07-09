@@ -1,41 +1,261 @@
 {% extends 'main_app/base.html' %}
-{% load crispy_forms_tags %}
-{% block content %}
-<div class="container mt-4">
-    <h2>Assets List</h2>
-    <div class="mb-3">
-        <a href="{% url 'assets_create' %}" class="btn btn-primary">Add New Asset</a>
-        <a href="{% url 'dashboard' %}" class="btn btn-secondary">Back to Dashboard</a>
-    </div>
-    <table class="table table-striped table-bordered">
-        <thead class="thead-dark">
-            <tr>
-                <th>Name</th>
-                <th>Purchased Date</th>
-                <th>File Number</th>
-                <th>Value</th>
-                <th>Condition</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for asset in assets %}
-            <tr>
-                <td>{{ asset.name }}</td>
-                <td>{{ asset.purchased_date }}</td>
-                <td>{{ asset.file_number }}</td>
-                <td>{{ asset.value }}</td>
-                <td>{{ asset.get_condition_display }}</td>
-                <td>
-                    <a href="{% url 'assets_detail' asset.pk %}" class="btn btn-info btn-sm">View</a>
-                    <a href="{% url 'assets_update' asset.pk %}" class="btn btn-warning btn-sm">Edit</a>
-                    <a href="{% url 'assets_delete' asset.pk %}" class="btn btn-danger btn-sm">Delete</a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" class="text-center">No assets found.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
+{% block title %}Assets{% endblock %}
+
+{% block breadcrumb %}
+<div class="mb-4">
+    <nav aria-label="breadcrumb">
+        <ol class="breadcrumb mb-0">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item active">Assets</li>
+        </ol>
+    </nav>
 </div>
+{% endblock %}
+
+{% block content %}
+<div class="content-area">
+
+    {# ── Header ────────────────────────────────────────────────── #}
+    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+        <h4 class="fw-bold mb-0">School Assets</h4>
+        <a href="{% url 'assets_create' %}" class="btn btn-primary">
+            <i class="fas fa-plus me-2"></i> Add Asset
+        </a>
+    </div>
+
+    {# ── Summary Cards ─────────────────────────────────────────── #}
+    <div class="row g-3 mb-4">
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#1e88e5,#42a5f5);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-boxes-stacked fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ summary.total_count }}</div>
+                        <div class="small opacity-85">Total Assets</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#43a047,#66bb6a);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-sack-dollar fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-5">
+                            Rs {{ summary.total_value|floatformat:0|default:"0" }}
+                        </div>
+                        <div class="small opacity-85">Total Value</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#00897b,#26a69a);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-star fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ summary.new_count }}</div>
+                        <div class="small opacity-85">New Condition</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-6 col-md-3">
+            <div class="card border-0 text-white h-100"
+                 style="background:linear-gradient(135deg,#fb8c00,#ffa726);">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <i class="fas fa-box-open fa-2x opacity-75"></i>
+                    <div>
+                        <div class="fw-bold fs-4">{{ summary.used_count }}</div>
+                        <div class="small opacity-85">Used Condition</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    {# ── Filter / Search Bar ───────────────────────────────────── #}
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3 align-items-end">
+
+                <div class="col-md-5">
+                    <label class="form-label small">Search</label>
+                    <input type="text" name="search" class="form-control"
+                           value="{{ search }}"
+                           placeholder="Name, file number, purchased by...">
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label small">Condition</label>
+                    <select name="condition" class="form-select">
+                        <option value="">All</option>
+                        <option value="New"  {% if condition == 'New'  %}selected{% endif %}>New</option>
+                        <option value="Used" {% if condition == 'Used' %}selected{% endif %}>Used</option>
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label small">Sort By</label>
+                    <select name="sort" class="form-select">
+                        <option value="-purchased_date" {% if sort == '-purchased_date' %}selected{% endif %}>Newest First</option>
+                        <option value="purchased_date"  {% if sort == 'purchased_date'  %}selected{% endif %}>Oldest First</option>
+                        <option value="name"            {% if sort == 'name'            %}selected{% endif %}>Name A–Z</option>
+                        <option value="-name"           {% if sort == '-name'           %}selected{% endif %}>Name Z–A</option>
+                        <option value="-value"          {% if sort == '-value'          %}selected{% endif %}>Highest Value</option>
+                        <option value="value"           {% if sort == 'value'           %}selected{% endif %}>Lowest Value</option>
+                    </select>
+                </div>
+
+                <div class="col-md-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-filter me-1"></i> Filter
+                    </button>
+                    {% if search or condition %}
+                    <a href="{% url 'assets_list' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-times"></i>
+                    </a>
+                    {% endif %}
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    {# ── Assets Table ──────────────────────────────────────────── #}
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Name</th>
+                        <th>File No.</th>
+                        <th>Purchased Date</th>
+                        <th>Purchased By</th>
+                        <th>Condition</th>
+                        <th class="text-end">Value (Rs)</th>
+                        <th style="width:120px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for asset in page_obj %}
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">{{ asset.name }}</div>
+                            {% if asset.description %}
+                                <small class="text-muted">{{ asset.description|truncatechars:50 }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-muted small">{{ asset.file_number|default:"—" }}</td>
+                        <td>{{ asset.purchased_date|date:"d M Y" }}</td>
+                        <td>{{ asset.purchased_by }}</td>
+                        <td>
+                            <span class="badge bg-{% if asset.condition == 'New' %}success{% else %}warning text-dark{% endif %}">
+                                {{ asset.condition }}
+                            </span>
+                        </td>
+                        <td class="text-end fw-semibold">{{ asset.value|floatformat:0 }}</td>
+                        <td class="text-end">
+                            <a href="{% url 'assets_detail' asset.pk %}"
+                               class="btn btn-sm btn-outline-primary me-1">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                            <a href="{% url 'assets_update' asset.pk %}"
+                               class="btn btn-sm btn-outline-warning me-1">
+                                <i class="fas fa-edit"></i>
+                            </a>
+                            <a href="{% url 'assets_delete' asset.pk %}"
+                               class="btn btn-sm btn-outline-danger">
+                                <i class="fas fa-trash"></i>
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-5">
+                            <i class="fas fa-boxes-stacked fa-3x mb-3 opacity-25 d-block"></i>
+                            {% if search or condition %}
+                                No assets match your filters.
+                                <a href="{% url 'assets_list' %}">Clear filters</a>
+                            {% else %}
+                                No assets recorded yet.
+                                <a href="{% url 'assets_create' %}">Add your first asset</a>.
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if page_obj %}
+                <tfoot class="table-light">
+                    <tr>
+                        <td colspan="5" class="fw-semibold text-end">
+                            Page Total (filtered):
+                        </td>
+                        <td class="text-end fw-bold">
+                            Rs {% with total=0 %}
+                                {% for a in page_obj %}{{ a.value|add:0 }}{% endfor %}
+                            {% endwith %}
+                            {# JS fills this — see below #}
+                            <span id="page-total"></span>
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+
+    {# ── Pagination ────────────────────────────────────────────── #}
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}&search={{ search }}&condition={{ condition }}&sort={{ sort }}">
+                    Previous
+                </a>
+            </li>
+            {% endif %}
+            <li class="page-item disabled">
+                <span class="page-link">
+                    Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}
+                </span>
+            </li>
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}&search={{ search }}&condition={{ condition }}&sort={{ sort }}">
+                    Next
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Compute page total from the value cells in the table
+document.addEventListener('DOMContentLoaded', function () {
+    var total = 0;
+    document.querySelectorAll('tbody tr td:nth-child(6)').forEach(function (cell) {
+        var v = parseFloat(cell.textContent.replace(/,/g, '').trim()) || 0;
+        total += v;
+    });
+    var el = document.getElementById('page-total');
+    if (el) el.textContent = total.toLocaleString('en-PK', {maximumFractionDigits: 0});
+});
+</script>
 {% endblock %}

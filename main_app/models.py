@@ -26,6 +26,9 @@ GENDER_CHOICES = [('Male', 'Male'), ('Female', 'Female')]
 
 
 
+
+
+
 # Add this after SECTION_CHOICES
 CLASS_PROGRESSION = {
     'PG': 'Nursery',
@@ -294,8 +297,13 @@ class Student(TimestampedModel):
                 last_student = Student.objects.select_for_update().filter(
                     school=self.school
                 ).order_by('created_at').last()
-                school_prefix = self.school.id
-                last_id = int(last_student.student_id.split('-')[-1]) if last_student else 0
+                school_prefix = self.school.id if self.school_id else 0
+                last_id = 0
+                if last_student and getattr(last_student, 'student_id', None):
+                    try:
+                        last_id = int(str(last_student.student_id).split('-')[-1])
+                    except (ValueError, TypeError):
+                        last_id = 0
                 self.student_id = f"SCH{school_prefix}-{last_id + 1:04d}"
         super().save(*args, **kwargs)
 
@@ -621,9 +629,20 @@ class TemporaryPassword(TimestampedModel):
         return f"Temporary Password for {self.user.username}"
 
     @staticmethod
-    def generate_password(length=12):
-        characters = string.ascii_letters + string.digits + string.punctuation
-        return ''.join(secrets.choice(characters) for _ in range(length))
+    def generate_password(length=10):
+        """Letters and digits only — easy to copy from admin UI and type at login."""
+        alphabet = string.ascii_letters + string.digits
+        return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+    @classmethod
+    def assign_to_user(cls, user, password=None):
+        """Set login password on user and store plain copy for admin display."""
+        password = password or cls.generate_password()
+        user.set_password(password)
+        user.is_active = True
+        user.save(update_fields=['password', 'is_active'])
+        cls.objects.update_or_create(user=user, defaults={'password': password})
+        return password
 
 
 class Assets(TimestampedModel):
@@ -632,7 +651,7 @@ class Assets(TimestampedModel):
     school = models.ForeignKey(School, on_delete=models.CASCADE, related_name='assets')
     name = models.CharField(max_length=100)
     purchased_date = models.DateField()
-    file_number = models.CharField(max_length=50, unique=True)
+    file_number = models.CharField(max_length=50, blank=True)
     value = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'),
                                 validators=[MinValueValidator(0)])
     purchased_by = models.CharField(max_length=100)
@@ -642,7 +661,7 @@ class Assets(TimestampedModel):
     class Meta:
         verbose_name = "Asset"
         verbose_name_plural = "Assets"
-        unique_together = ('school', 'file_number')
+        
 
     def __str__(self):
         return f"{self.name} ({self.school.school_name})"
@@ -650,40 +669,100 @@ class Assets(TimestampedModel):
 
 class Expenses(TimestampedModel):
     EXPENSE_TYPE_CHOICES = [('Monthly', 'Monthly'), ('Daily', 'Daily')]
-    EXPENSE_NAME_CHOICES = [
-        ('Electricity Bill', 'Electricity Bill'), ('WiFi Bill', 'WiFi Bill'),
-        ('Building Rent', 'Building Rent'), ('Carpenter', 'Carpenter'),
-        ('Transport', 'Transport'), ('Welder', 'Welder'), ('Event', 'Event'),
-        ('Electrician', 'Electrician'), ('Maintain', 'Maintain'),
-        ('Plumber', 'Plumber'), ('Painter', 'Painter'), ('Tools', 'Tools'),
-        ('First Aid', 'First Aid'), ('Sports', 'Sports'), ('Exam', 'Exam'),
-        ('Stationary', 'Stationary'), ('Food', 'Food'), ('Other', 'Other'),
+
+    # ==================== NAME CHOICES ====================
+    DAILY_NAME_CHOICES = [
+        ('Food', 'Food'),
+        ('Stationary', 'Stationary'),
+        ('Other', 'Other'),
     ]
 
+    MONTHLY_NAME_CHOICES = [
+        ('Electricity Bill', 'Electricity Bill'), 
+        ('WiFi Bill', 'WiFi Bill'),
+        ('Building Rent', 'Building Rent'), 
+        ('Carpenter', 'Carpenter'),
+        ('Transport', 'Transport'), 
+        ('Welder', 'Welder'), 
+        ('Event', 'Event'),
+        ('Electrician', 'Electrician'), 
+        ('Maintain', 'Maintain'),
+        ('Plumber', 'Plumber'), 
+        ('Painter', 'Painter'), 
+        ('Tools', 'Tools'),
+        ('First Aid', 'First Aid'), 
+        ('Sports', 'Sports'), 
+        ('Exam', 'Exam'),
+        ('Stationary', 'Stationary'), 
+        ('Food', 'Food'), 
+        ('Other', 'Other'),
+    ]
+
+    # Combined choices for the model field
+    EXPENSE_NAME_CHOICES = DAILY_NAME_CHOICES + MONTHLY_NAME_CHOICES
+
+    # ==================== PERIOD CHOICES ====================
+    MONTH_CHOICES = [
+        ('January', 'January'), ('February', 'February'), ('March', 'March'),
+        ('April', 'April'), ('May', 'May'), ('June', 'June'),
+        ('July', 'July'), ('August', 'August'), ('September', 'September'),
+        ('October', 'October'), ('November', 'November'), ('December', 'December'),
+    ]
+
+    DAY_CHOICES = [
+        ('Monday', 'Monday'), ('Tuesday', 'Tuesday'), ('Wednesday', 'Wednesday'),
+        ('Thursday', 'Thursday'), ('Friday', 'Friday'),
+        ('Saturday', 'Saturday'), ('Sunday', 'Sunday'),
+    ]
+
+    # ==================== FIELDS ====================
     school = models.ForeignKey(School, on_delete=models.CASCADE, related_name='expenses')
-    expense_type = models.CharField(max_length=10, choices=EXPENSE_TYPE_CHOICES)
-    expense_name = models.CharField(max_length=50, choices=EXPENSE_NAME_CHOICES)
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'),
-                                validators=[MinValueValidator(0)])
+    
+    expense_type = models.CharField(
+        max_length=10, 
+        choices=EXPENSE_TYPE_CHOICES
+    )
+    
+    expense_name = models.CharField(
+        max_length=50, 
+        choices=EXPENSE_NAME_CHOICES          # ← Now defined
+    )
+    
+    price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2,
+        default=Decimal('0.00'),
+        validators=[MinValueValidator(0)]
+    )
+    
     payment_date = models.DateField(default=timezone.now)
     payment_by = models.CharField(max_length=100)
     file_number = models.CharField(max_length=50, blank=True, null=True)
-    period = models.CharField(max_length=20, blank=True, null=True)  # Month or Day
+    period = models.CharField(max_length=20, blank=True, null=True)
     description = models.TextField(blank=True)
 
     class Meta:
         verbose_name = "Expense"
         verbose_name_plural = "Expenses"
+        indexes = [
+            models.Index(fields=['school', 'payment_date']),
+            models.Index(fields=['school', 'expense_type']),
+        ]
 
     def clean(self):
-        daily_choices = {'Stationary', 'Food'}
-        if self.expense_type == 'Daily' and self.expense_name not in daily_choices:
-            raise ValidationError("Daily expenses can only be Stationary or Food.")
-        if self.expense_type == 'Monthly' and self.expense_name in daily_choices:
-            raise ValidationError("Stationary and Food are only for Daily expenses.")
+        # Updated validation using new choice lists
+        daily_names = [name for name, _ in self.DAILY_NAME_CHOICES]
+        
+        if self.expense_type == 'Daily' and self.expense_name not in daily_names:
+            raise ValidationError(
+                {'expense_name': "Daily expenses must be Food, Stationary or Other."}
+            )
+        
+        if self.expense_type == 'Monthly' and self.expense_name in daily_names:
+            raise ValidationError(
+                {'expense_name': "Food, Stationary and Other are only for Daily expenses."}
+            )
 
-    def __str__(self):
-        return f"{self.expense_name} ({self.expense_type}) - {self.school.school_name}"
 
 
 class Transport(TimestampedModel):

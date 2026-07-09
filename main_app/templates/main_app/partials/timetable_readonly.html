@@ -1,0 +1,83 @@
+{% if timetable %}
+<div class="card shadow-sm" id="timetable">
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <h5 class="mb-0">
+            <i class="fas fa-table text-primary me-2" aria-hidden="true"></i>
+            Class timetable
+            <span class="text-muted fw-normal small">
+                — {{ timetable.class_name }} {{ timetable.section }}
+            </span>
+        </h5>
+        {% if timetable.period_count %}
+            <span class="badge bg-light text-dark">{{ timetable.period_count }} period{{ timetable.period_count|pluralize }}</span>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        {% if timetable.grid %}
+            {% if not timetable.has_entries %}
+                <div class="text-center py-5 text-muted">
+                    <i class="fas fa-clock fa-3x mb-3 opacity-50" aria-hidden="true"></i>
+                    <p class="mb-0">Timetable has not been published for your class yet.</p>
+                </div>
+            {% else %}
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:140px;">Period</th>
+                                <th style="width:120px;">Time</th>
+                                <th>Subject</th>
+                                {% if show_teacher_column|default:True %}
+                                    <th>Teacher</th>
+                                {% endif %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in timetable.grid %}
+                            <tr class="{% if row.is_break %}table-secondary{% elif highlight_teacher_id and row.teacher_id == highlight_teacher_id %}table-primary bg-opacity-10{% endif %}">
+                                <td class="fw-semibold">
+                                    {{ row.period.name }}
+                                    {% if row.is_break %}
+                                        <span class="badge bg-secondary ms-1">Break</span>
+                                    {% elif highlight_teacher_id and row.teacher_id == highlight_teacher_id %}
+                                        <span class="badge bg-primary ms-1">You</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-muted small">
+                                    {{ row.period.start_time|time:"H:i" }} – {{ row.period.end_time|time:"H:i" }}
+                                </td>
+                                {% if row.is_break %}
+                                    <td colspan="{% if show_teacher_column|default:True %}2{% else %}1{% endif %}" class="text-muted fst-italic small">— Break —</td>
+                                {% else %}
+                                    <td>
+                                        {% if row.subject_name %}
+                                            <strong>{{ row.subject_name }}</strong>
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    {% if show_teacher_column|default:True %}
+                                    <td>
+                                        {% if row.teacher_name %}
+                                            {{ row.teacher_name }}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    {% endif %}
+                                {% endif %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="text-center py-5 text-muted">
+                <i class="fas fa-clock fa-3x mb-3 opacity-50" aria-hidden="true"></i>
+                <p class="mb-0">School periods are not configured yet.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}

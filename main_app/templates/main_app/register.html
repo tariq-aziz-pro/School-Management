@@ -2,54 +2,200 @@
 {% load crispy_forms_tags %}
 {% block title %}Register School{% endblock %}
 
+{% block extra_css %}
+<style>
+    main.guest-main:has(.register-card) {
+        align-items: flex-start;
+        padding-top: 40px;
+    }
+
+    .register-header {
+        background: linear-gradient(135deg, #1565c0, #1e88e5);
+        border-radius: 18px 18px 0 0;
+        padding: 2.5rem 2rem;
+        text-align: center;
+        color: #fff;
+    }
+
+    .register-header .header-icon {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.6rem;
+        margin: 0 auto 1rem;
+    }
+
+    .section-heading {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 1.25rem;
+    }
+
+    .section-heading .badge-circle {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #1565c0;
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.9rem;
+        flex-shrink: 0;
+    }
+
+    .form-section + .form-section {
+        margin-top: 2.25rem;
+        padding-top: 2rem;
+        border-top: 1px solid var(--pl-border, #e9ecef);
+    }
+
+    .logo-preview {
+        width: 72px;
+        height: 72px;
+        border-radius: 14px;
+        background: #f1f5f9;
+        border: 1px dashed #b4c3d6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #98a1b2;
+        font-size: 1.4rem;
+        overflow: hidden;
+        flex-shrink: 0;
+    }
+
+    .logo-preview img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="guest-main">
     <div class="container">
-    <div class="col-lg-9 col-xl-8 mx-auto">
-        <div class="card shadow">
-            <div class="card-header bg-primary text-white text-center py-4">
-                <h3 class="mb-1">School Registration</h3>
-                <p class="mb-0 opacity-75">Join PowerLink and manage your school digitally</p>
-            </div>
-            <div class="card-body p-5">
-                
-                {% if messages %}
+        <div class="col-lg-9 col-xl-8 mx-auto register-card">
+            <div class="card shadow border-0">
+                <div class="register-header">
+                    <div class="header-icon"><i class="fas fa-school"></i></div>
+                    <h3 class="mb-1 fw-bold">Create your school account</h3>
+                    <p class="mb-0 opacity-75">Set up your school portal in minutes — free to get started</p>
+                </div>
+
+                <div class="card-body p-5">
+
+                    {% if messages %}
                     {% for message in messages %}
-                        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                            {{ message }}
-                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                        </div>
+                    <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
                     {% endfor %}
-                {% endif %}
+                    {% endif %}
 
-                <form method="post" enctype="multipart/form-data">
-                    {% csrf_token %}
-                    
-                    <div class="row g-4">
-                        <div class="col-md-6">{{ form.school_name|as_crispy_field }}</div>
-                        <div class="col-md-6">{{ form.school_logo|as_crispy_field }}</div>
-                        
-                        <div class="col-md-6">{{ form.city|as_crispy_field }}</div>
-                        <div class="col-md-6">{{ form.owner_name|as_crispy_field }}</div>
-                        
-                        <div class="col-md-6">{{ form.contact_number|as_crispy_field }}</div>
-                        <div class="col-md-6">{{ form.number_of_students|as_crispy_field }}</div>
-                        
-                        <div class="col-md-6">{{ form.username|as_crispy_field }}</div>
-                        <div class="col-md-6">{{ form.email|as_crispy_field }}</div>
-                        
-                        <div class="col-md-6">{{ form.password1|as_crispy_field }}</div>
-                        <div class="col-md-6">{{ form.password2|as_crispy_field }}</div>
-                    </div>
+                    <form method="post" enctype="multipart/form-data">
+                        {% csrf_token %}
 
-                    <div class="mt-5 text-end">
-                        <a href="{% url 'index' %}" class="btn btn-secondary px-4">Cancel</a>
-                        <button type="submit" class="btn btn-primary px-5">Register School</button>
+                        <!-- Section 1: School details -->
+                        <div class="form-section">
+                            <div class="section-heading">
+                                <span class="badge-circle">1</span>
+                                <h6 class="fw-bold mb-0">School details</h6>
+                            </div>
+
+                            <div class="row g-4 align-items-start">
+                                <div class="col-12 d-flex gap-3 align-items-center mb-2">
+                                    <div class="logo-preview" id="logoPreview">
+                                        <i class="fas fa-image"></i>
+                                    </div>
+                                    <div class="flex-grow-1">
+                                        {{ form.school_logo|as_crispy_field }}
+                                    </div>
+                                </div>
+                                <div class="col-md-6">{{ form.school_name|as_crispy_field }}</div>
+                                <div class="col-md-6">{{ form.city|as_crispy_field }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Section 2: Owner & contact -->
+                        <div class="form-section">
+                            <div class="section-heading">
+                                <span class="badge-circle">2</span>
+                                <h6 class="fw-bold mb-0">Owner &amp; contact</h6>
+                            </div>
+
+                            <div class="row g-4">
+                                <div class="col-md-6">{{ form.owner_name|as_crispy_field }}</div>
+                                <div class="col-md-6">{{ form.contact_number|as_crispy_field }}</div>
+                                <div class="col-md-6">{{ form.number_of_students|as_crispy_field }}</div>
+                                <div class="col-md-6">{{ form.email|as_crispy_field }}</div>
+                            </div>
+                        </div>
+
+                        <!-- Section 3: Account credentials -->
+                        <div class="form-section">
+                            <div class="section-heading">
+                                <span class="badge-circle">3</span>
+                                <h6 class="fw-bold mb-0">Account credentials</h6>
+                            </div>
+
+                            <div class="row g-4">
+                                <div class="col-md-6">{{ form.username|as_crispy_field }}</div>
+                                <div class="col-md-6"></div>
+                                <div class="col-md-6">{{ form.password1|as_crispy_field }}</div>
+                                <div class="col-md-6">{{ form.password2|as_crispy_field }}</div>
+                            </div>
+                        </div>
+
+                        <div class="mt-5 d-flex flex-wrap gap-3 justify-content-between align-items-center">
+                            <small class="text-muted">
+                                <i class="fas fa-circle-info me-1"></i>
+                                Your admin account is created automatically for this school.
+                            </small>
+                            <div class="d-flex gap-2">
+                                <a href="{% url 'index' %}" class="btn btn-outline-secondary px-4">Cancel</a>
+                                <button type="submit" class="btn btn-primary px-5">
+                                    <i class="fas fa-arrow-right me-2"></i> Register school
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+
+                    <div class="text-center mt-4">
+                        <small class="text-muted">
+                            Already have an account? <a href="{% url 'login' %}" class="text-primary">Sign in</a>
+                        </small>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
 </div>
-</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var logoInput = document.querySelector('input[type="file"][name="school_logo"]');
+    var preview = document.getElementById('logoPreview');
+
+    if (logoInput) {
+        logoInput.addEventListener('change', function () {
+            var file = this.files && this.files[0];
+            if (!file) return;
+            var reader = new FileReader();
+            reader.onload = function (e) {
+                preview.innerHTML = '<img src="' + e.target.result + '" alt="School logo preview">';
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+});
+</script>
 {% endblock %}

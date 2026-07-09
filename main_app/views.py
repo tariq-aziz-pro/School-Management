@@ -34,7 +34,15 @@ import logging
 from django.db.models.functions import TruncMonth
 from django.db.models import Value as V
 from django.db.models import Avg, ExpressionWrapper, FloatField
-from .view_helpers import calculate_overall_grade
+from .view_helpers import (
+    calculate_overall_grade,
+    get_class_timetable_grid,
+    get_teacher_class_admissions,
+    get_teacher_managed_result,
+    get_teacher_managed_results,
+    get_teacher_timetable_assignments,
+    get_teacher_upcoming_events,
+)
 
 from django.apps import apps
 from plotly.offline import plot
@@ -71,6 +79,7 @@ from .view_parts.auth import (
 from .view_parts.admissions import (
     student_user_create,
     student_list,
+    reset_student_password,
     student_dashboard,
     student_admission,
     edit_student,
@@ -99,6 +108,8 @@ from .utils import (
     create_repeat_admission,
     annotate_outstanding,
 )
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1175,9 +1186,23 @@ def monthly_fee_success(request, monthly_fee_id):
     return render(request, 'main_app/monthly_fee_success.html', {'monthly_fee': fee})
  
 
-@school_staff_required
+@login_required(login_url='login')
 def monthly_fee_pdf(request, monthly_fee_id):
-    monthly_fee = get_object_or_404(MonthlyFee, id=monthly_fee_id, student_admission__student__school=request.user.school)
+    monthly_fee = get_object_or_404(
+        MonthlyFee.objects.select_related('student_admission__student__school'),
+        id=monthly_fee_id,
+    )
+    student = monthly_fee.student_admission.student
+
+    if is_student(request.user):
+        if request.user.username != student.student_id:
+            return HttpResponseForbidden("You cannot access this fee receipt.")
+    elif is_school_staff(request.user):
+        if not request.user.school_id or student.school_id != request.user.school_id:
+            return HttpResponseForbidden("You cannot access this fee receipt.")
+    else:
+        messages.error(request, "You do not have permission to view this receipt.")
+        return redirect('login')
     student_admission = monthly_fee.student_admission
     student = student_admission.student
     school = student.school
@@ -1718,15 +1743,22 @@ def teacher_create(request):
         form = TeacherForm(data=request.POST, request=request)
         if form.is_valid():
             try:
-                form.save()
-                messages.success(request, "Teacher created successfully.")
+                teacher = form.save()
+                generated_password = getattr(form, 'generated_password', None)
+                if generated_password:
+                    messages.success(
+                        request,
+                        f"Teacher created successfully. Username: {teacher.user.username} | Temporary password: {generated_password}"
+                    )
+                else:
+                    messages.success(request, "Teacher created successfully.")
                 return redirect('teacher_list')
             except Exception as e:
                 logger.error("Error creating teacher: %s", str(e))
                 messages.error(request, f"Error creating teacher: {str(e)}")
         else:
             logger.warning("Teacher form invalid: %s", form.errors)
-            messages.error(request, f"Form invalid: {form.errors.as_text()}")
+            messages.error(request, f"Please correct the highlighted errors below.")
     else:
         form = TeacherForm(request=request)
  
@@ -1808,42 +1840,32 @@ def teacher_delete(request, teacher_id):
 @teacher_required
 def teacher_dashboard(request):
     teacher = get_object_or_404(
-        Teacher.objects.select_related('user', 'school'),
+        Teacher.objects.select_related('user', 'school').prefetch_related('subjects'),
         user=request.user,
-        school=request.user.school
+        school=request.user.school,
     )
-    
-    active_session = AcademicSession.objects.filter(
-        school=request.user.school, 
-        is_active=True
-    ).first()
+
+    active_session = get_active_session(request)
 
     if not active_session:
-        context = {
-            'teacher': teacher,
-            'active_session': None,
-        }
-        return render(request, 'main_app/teacher_dashboard.html', context)
+        return render(
+            request,
+            'main_app/teacher_dashboard.html',
+            {
+                'teacher': teacher,
+                'active_session': None,
+                'subjects': teacher.subjects.all(),
+            },
+        )
 
-    # Get all students in teacher's class/section
-    students_qs = StudentAdmission.objects.filter(
-        student__school=teacher.school,
-        class_name=teacher.class_name,
-        section=teacher.section,
-        academic_session=active_session
-    ).select_related('student')
-
+    students_qs = get_teacher_class_admissions(teacher, active_session)
     total_students = students_qs.count()
+    class_students = students_qs.order_by('roll_number')
 
-    # Results - Only teacher's subjects
-    results_qs = StudentResult.objects.filter(
-        student_admission__in=students_qs,
-        subject__in=teacher.subjects.all()
-    ).select_related('student_admission__student', 'subject')
+    results_qs = get_teacher_managed_results(teacher, active_session)
 
-    # Apply filters
-    exam_type = request.GET.get('exam_type', '')
-    subject_id = request.GET.get('subject', '')
+    exam_type = request.GET.get('exam_type', '').strip()
+    subject_id = request.GET.get('subject', '').strip()
 
     if exam_type:
         results_qs = results_qs.filter(exam_type=exam_type)
@@ -1851,33 +1873,37 @@ def teacher_dashboard(request):
         results_qs = results_qs.filter(subject_id=subject_id)
 
     results = results_qs.order_by(
-        'student_admission__student__first_name', 
-        'subject__name', 
-        'exam_type'
+        '-id',
+        'student_admission__student__first_name',
+        'subject__name',
+        'exam_type',
     )
-
-    # Upcoming Events
-    events = Events.objects.filter(
-        school=teacher.school,
-        event_for__in=['All', 'Teacher']
-    ).order_by('event_date')[:8]
 
     context = {
         'teacher': teacher,
         'active_session': active_session,
         'total_students': total_students,
+        'class_students': class_students,
         'results': results,
+        'recent_results': results[:10],
         'subjects': teacher.subjects.all(),
-        'exam_types': StudentResult.EXAM_TYPE_CHOICES,   # or get dynamic
+        'exam_types': StudentResult.EXAM_TYPE_CHOICES,
         'exam_type': exam_type,
         'subject_id': subject_id,
-        'events': events,
-        
-        # Extra useful stats
+        'events': get_teacher_upcoming_events(teacher.school),
         'total_results': results.count(),
-        'recent_results': results[:10],   # Already slicing in template, but good to have
+        'timetable': get_class_timetable_grid(
+            teacher.school,
+            active_session,
+            teacher.class_name,
+            teacher.section,
+        ),
+        'teacher_other_assignments': [
+            slot for slot in get_teacher_timetable_assignments(teacher, active_session)
+            if slot.class_name != teacher.class_name or slot.section != teacher.section
+        ],
     }
-    
+
     return render(request, 'main_app/teacher_dashboard.html', context)
 
 #-------------------------Result---------------------------------
@@ -1910,17 +1936,10 @@ def result_edit(request, result_id):
     teacher = get_object_or_404(
         Teacher,
         user=request.user,
-        school=request.user.school
+        school=request.user.school,
     )
-    # ✅ Scoped to teacher's school + class + section
-    # prevents Teacher A editing Teacher B's results in same school
-    result = get_object_or_404(
-        StudentResult,
-        id=result_id,
-        student_admission__student__school=teacher.school,
-        student_admission__class_name=teacher.class_name,
-        student_admission__section=teacher.section
-    )
+    active_session = get_active_session(request)
+    result = get_teacher_managed_result(teacher, result_id, active_session=active_session)
     if request.method == 'POST':
         form = StudentResultForm(request.POST, instance=result, teacher=teacher)
         if form.is_valid():
@@ -1942,16 +1961,10 @@ def result_delete(request, result_id):
     teacher = get_object_or_404(
         Teacher,
         user=request.user,
-        school=request.user.school
+        school=request.user.school,
     )
-    # ✅ Scoped to teacher's school + class + section
-    result = get_object_or_404(
-        StudentResult,
-        id=result_id,
-        student_admission__student__school=teacher.school,
-        student_admission__class_name=teacher.class_name,
-        student_admission__section=teacher.section
-    )
+    active_session = get_active_session(request)
+    result = get_teacher_managed_result(teacher, result_id, active_session=active_session)
     if request.method == 'POST':
         result.delete()
         messages.success(request, "Result deleted successfully.")
@@ -2357,76 +2370,153 @@ def staff_delete(request, pk):
 
 
 #--------------------------Assets-------------------------------------
+def _get_school_or_redirect(request):
+    """
+    Returns the school if the user has one, otherwise adds an error
+    message and returns None. Caller should redirect if None.
+    """
+    if not request.user.school:
+        messages.error(request, "Your account is not associated with any school.")
+        return None
+    return request.user.school
+ 
+ 
+# ── List ──────────────────────────────────────────────────────
+ 
 @school_staff_required
 def assets_list(request):
-    if not request.user.school:
-        messages.error(request, "You are not associated with any school.")
+    school = _get_school_or_redirect(request)
+    if not school:
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
-        return render(request, 'main_app/no_session.html')
-    assets = Assets.objects.filter(school=request.user.school)
-    return render(request, 'main_app/assets_list.html', {'assets': assets})
-
+ 
+    qs = Assets.objects.filter(school=school)
+ 
+    # ── Search ────────────────────────────────────────────────
+    search = request.GET.get('search', '').strip()
+    if search:
+        qs = qs.filter(
+            Q(name__icontains=search)
+            | Q(file_number__icontains=search)
+            | Q(purchased_by__icontains=search)
+            | Q(description__icontains=search)
+        )
+ 
+    # ── Filter by condition ───────────────────────────────────
+    condition = request.GET.get('condition', '')
+    if condition in ('New', 'Used'):
+        qs = qs.filter(condition=condition)
+ 
+    # ── Sort ──────────────────────────────────────────────────
+    sort = request.GET.get('sort', '-purchased_date')
+    allowed_sorts = {
+        'name', '-name',
+        'value', '-value',
+        'purchased_date', '-purchased_date',
+        'condition', '-condition',
+    }
+    if sort not in allowed_sorts:
+        sort = '-purchased_date'
+    qs = qs.order_by(sort)
+ 
+    # ── Summary stats (always unfiltered for the school) ──────
+    all_assets = Assets.objects.filter(school=school)
+    summary = all_assets.aggregate(
+        total_count = Count('id'),
+        total_value = Sum('value'),
+        new_count   = Count('id', filter=Q(condition='New')),
+        used_count  = Count('id', filter=Q(condition='Used')),
+    )
+ 
+    # ── Pagination ────────────────────────────────────────────
+    paginator   = Paginator(qs, 20)
+    page_obj    = paginator.get_page(request.GET.get('page', 1))
+ 
+    return render(request, 'main_app/assets_list.html', {
+        'page_obj':  page_obj,
+        'summary':   summary,
+        'search':    search,
+        'condition': condition,
+        'sort':      sort,
+    })
+ 
+ 
+# ── Detail ────────────────────────────────────────────────────
+ 
 @school_staff_required
 def assets_detail(request, pk):
-    if not request.user.school:
-        messages.error(request, "You are not associated with any school.")
+    school = _get_school_or_redirect(request)
+    if not school:
         return redirect('dashboard')
-    if not AcademicSession.objects.filter(school=request.user.school, is_active=True).exists():
-        messages.error(request, "No active academic session found.")
-        return render(request, 'main_app/no_session.html')
-    asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
+ 
+    asset = get_object_or_404(Assets, pk=pk, school=school)
     return render(request, 'main_app/assets_detail.html', {'asset': asset})
-
+ 
+ 
+# ── Create ────────────────────────────────────────────────────
+ 
 @school_staff_required
 def assets_create(request):
-    if not request.user.school:
-        messages.error(request, "You are not associated with any school.")
+    school = _get_school_or_redirect(request)
+    if not school:
         return redirect('dashboard')
-    if not get_active_session(request):
-        return render(request, 'main_app/no_session.html')
+ 
     if request.method == 'POST':
         form = AssetsForm(request.POST, user=request.user)
         if form.is_valid():
             form.save()
-            messages.success(request, "Asset created successfully.")
+            messages.success(request, "Asset added successfully.")
             return redirect('assets_list')
     else:
         form = AssetsForm(user=request.user)
-    return render(request, 'main_app/assets_form.html', {'form': form, 'title': 'Add Asset'})
-
+ 
+    return render(request, 'main_app/assets_form.html', {
+        'form':  form,
+        'title': 'Add Asset',
+    })
+ 
+ 
+# ── Update ────────────────────────────────────────────────────
+ 
 @school_staff_required
 def assets_update(request, pk):
-    if not request.user.school:
-        messages.error(request, "You are not associated with any school.")
+    school = _get_school_or_redirect(request)
+    if not school:
         return redirect('dashboard')
-    if not get_active_session(request):
-        return render(request, 'main_app/no_session.html')
-    asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
+ 
+    asset = get_object_or_404(Assets, pk=pk, school=school)
+ 
     if request.method == 'POST':
         form = AssetsForm(request.POST, instance=asset, user=request.user)
         if form.is_valid():
             form.save()
             messages.success(request, "Asset updated successfully.")
-            return redirect('assets_list')
+            return redirect('assets_detail', pk=pk)
     else:
         form = AssetsForm(instance=asset, user=request.user)
-    return render(request, 'main_app/assets_form.html', {'form': form, 'title': 'Edit Asset'})
-
+ 
+    return render(request, 'main_app/assets_form.html', {
+        'form':  form,
+        'title': 'Edit Asset',
+        'asset': asset,
+    })
+ 
+ 
+# ── Delete ────────────────────────────────────────────────────
+ 
 @school_staff_required
 def assets_delete(request, pk):
-    if not request.user.school:
-        messages.error(request, "You are not associated with any school.")
+    school = _get_school_or_redirect(request)
+    if not school:
         return redirect('dashboard')
-    if not get_active_session(request):
-        return render(request, 'main_app/no_session.html')
-    asset = get_object_or_404(Assets, pk=pk, school=request.user.school)
+ 
+    asset = get_object_or_404(Assets, pk=pk, school=school)
+ 
     if request.method == 'POST':
         asset.delete()
-        messages.success(request, "Asset deleted successfully.")
+        messages.success(request, f"Asset '{asset.name}' deleted.")
         return redirect('assets_list')
-    return render(request, 'main_app/assets_confirm_delete.html', {'asset': asset})    
+ 
+    return render(request, 'main_app/assets_confirm_delete.html', {'asset': asset})
 
 
 #----------------------------Expenses---------------------------------

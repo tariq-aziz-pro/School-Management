@@ -14,25 +14,24 @@
 {% block content %}
 <div class="content-area">
 
-    <!-- Teacher Profile Header -->
     <div class="card shadow-sm mb-4 border-0 overflow-hidden">
         <div class="card-body p-4">
             <div class="row align-items-center">
                 <div class="col-auto">
-                    <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center" 
+                    <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center"
                          style="width: 85px; height: 85px;">
-                        <i class="fas fa-chalkboard-teacher fa-3x text-primary"></i>
+                        <i class="fas fa-chalkboard-teacher fa-3x text-primary" aria-hidden="true"></i>
                     </div>
                 </div>
                 <div class="col">
-                    <h3 class="fw-bold mb-1">Welcome, {{ request.user.teacher.name }}!</h3>
+                    <h3 class="fw-bold mb-1">Welcome, {{ teacher.name }}!</h3>
                     <p class="text-muted mb-2">
-                        {{ request.user.school.school_name }} • 
-                        <strong>Class {{ request.user.teacher.class_name }} {{ request.user.teacher.section }}</strong>
+                        {% if request.user.school %}{{ request.user.school.school_name }} • {% endif %}
+                        <strong>Class {{ teacher.class_name }} {{ teacher.section }}</strong>
                     </p>
                     <p class="mb-0 text-muted">
-                        <i class="fas fa-book"></i> Subjects: 
-                        <strong>{{ request.user.teacher.subjects.all|join:", " }}</strong>
+                        <i class="fas fa-book" aria-hidden="true"></i> Subjects:
+                        <strong>{% if subjects %}{{ subjects|join:", " }}{% else %}<span class="text-warning">None assigned — contact admin</span>{% endif %}</strong>
                     </p>
                 </div>
                 <div class="col-auto text-end">
@@ -46,66 +45,159 @@
         </div>
     </div>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
     {% if not active_session %}
         <div class="alert alert-warning">
-            <strong>No Active Session Found</strong><br>
+            <strong>No active session</strong><br>
             Please contact the school admin to activate an academic session.
         </div>
     {% else %}
 
         <div class="row g-4">
 
-            <!-- Quick Action Cards -->
             <div class="col-md-4">
-                <a href="{% url 'result_create' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
+                <a href="{% url 'result_create' %}" class="card shadow-sm text-decoration-none h-100">
                     <div class="card-body text-center py-5">
-                        <i class="fas fa-plus-circle fa-3x text-primary mb-3"></i>
-                        <h5 class="fw-bold">Add New Result</h5>
+                        <i class="fas fa-plus-circle fa-3x text-primary mb-3" aria-hidden="true"></i>
+                        <h5 class="fw-bold text-body">Add New Result</h5>
                         <small class="text-muted">Record marks for your students</small>
                     </div>
                 </a>
             </div>
 
             <div class="col-md-4">
-                <a href="{% url 'add_syllabus' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
+                <a href="{% url 'add_syllabus' %}" class="card shadow-sm text-decoration-none h-100">
                     <div class="card-body text-center py-5">
-                        <i class="fas fa-book fa-3x text-success mb-3"></i>
-                        <h5 class="fw-bold">Manage Syllabus</h5>
+                        <i class="fas fa-book fa-3x text-success mb-3" aria-hidden="true"></i>
+                        <h5 class="fw-bold text-body">Manage Syllabus</h5>
                         <small class="text-muted">Upload study material</small>
                     </div>
                 </a>
             </div>
 
             <div class="col-md-4">
-                <a href="{% url 'teacher_dashboard' %}" class="card shadow-sm text-decoration-none h-100 hover-shadow">
+                <a href="#class-students" class="card shadow-sm text-decoration-none h-100">
                     <div class="card-body text-center py-5">
-                        <i class="fas fa-users fa-3x text-info mb-3"></i>
-                        <h5 class="fw-bold">My Class ({{ total_students|default:0 }})</h5>
-                        <small class="text-muted">View all students</small>
+                        <i class="fas fa-users fa-3x text-info mb-3" aria-hidden="true"></i>
+                        <h5 class="fw-bold text-body">My Class ({{ total_students|default:0 }})</h5>
+                        <small class="text-muted">Active students this session</small>
                     </div>
                 </a>
             </div>
 
-            <!-- Recent Results -->
+            <div class="col-md-4">
+                <a href="#timetable" class="card shadow-sm text-decoration-none h-100">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-table fa-3x text-warning mb-3" aria-hidden="true"></i>
+                        <h5 class="fw-bold text-body">Class Timetable</h5>
+                        <small class="text-muted">Daily schedule for {{ teacher.class_name }} {{ teacher.section }}</small>
+                    </div>
+                </a>
+            </div>
+
+            {% if timetable %}
+            <div class="col-12">
+                {% include 'main_app/partials/timetable_readonly.html' with timetable=timetable highlight_teacher_id=teacher.id show_teacher_column=True %}
+            </div>
+            {% endif %}
+
+            {% if teacher_other_assignments %}
             <div class="col-12">
                 <div class="card shadow-sm">
                     <div class="card-header bg-white">
-                        <h5 class="mb-0 d-flex align-items-center">
-                            <i class="fas fa-chart-bar text-primary me-2"></i>
-                            Recent Results
+                        <h5 class="mb-0">
+                            <i class="fas fa-chalkboard text-primary me-2" aria-hidden="true"></i>
+                            Your periods in other classes
                         </h5>
                     </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Class</th>
+                                    <th>Period</th>
+                                    <th>Time</th>
+                                    <th>Subject</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for slot in teacher_other_assignments %}
+                                <tr>
+                                    <td><strong>{{ slot.class_name }} {{ slot.section }}</strong></td>
+                                    <td>{{ slot.period.name }}</td>
+                                    <td class="text-muted small">{{ slot.period.start_time|time:"H:i" }} – {{ slot.period.end_time|time:"H:i" }}</td>
+                                    <td>{{ slot.subject.name|default:"—" }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="col-12" id="class-students">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-users text-info me-2" aria-hidden="true"></i>
+                            My Class — {{ teacher.class_name }} {{ teacher.section }}
+                        </h5>
+                        <span class="badge bg-secondary">{{ total_students }} active</span>
+                    </div>
+                    <div class="card-body p-0">
+                        {% if class_students %}
+                            <div class="table-responsive">
+                                <table class="table table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Roll</th>
+                                            <th>Student</th>
+                                            <th>Student ID</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for admission in class_students %}
+                                        <tr>
+                                            <td>{{ admission.roll_number }}</td>
+                                            <td>{{ admission.student.first_name }} {{ admission.student.last_name }}</td>
+                                            <td><code>{{ admission.student.student_id }}</code></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {% else %}
+                            <p class="text-muted text-center py-4 mb-0">No active students in your class for this session.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <h5 class="mb-0">
+                            <i class="fas fa-chart-bar text-primary me-2" aria-hidden="true"></i>
+                            Recent Results
+                            {% if total_results %}<span class="badge bg-light text-dark ms-1">{{ total_results }} total</span>{% endif %}
+                        </h5>
+                        <form method="get" class="d-flex flex-wrap gap-2">
+                            <select name="exam_type" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+                                <option value="">All exam types</option>
+                                {% for value, label in exam_types %}
+                                    <option value="{{ value }}" {% if exam_type == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <select name="subject" class="form-select form-select-sm" style="width: auto;" onchange="this.form.submit()">
+                                <option value="">All subjects</option>
+                                {% for subj in subjects %}
+                                    <option value="{{ subj.id }}" {% if subject_id == subj.id|stringformat:"s" %}selected{% endif %}>{{ subj.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </form>
+                    </div>
                     <div class="card-body">
-                        {% if results %}
+                        {% if recent_results %}
                             <div class="table-responsive">
                                 <table class="table table-hover align-middle">
                                     <thead class="table-light">
@@ -114,12 +206,13 @@
                                             <th>Subject</th>
                                             <th>Exam Type</th>
                                             <th class="text-end">Marks</th>
-                                            <th class="text-end">Percentage</th>
+                                            <th class="text-end">%</th>
                                             <th class="text-center">Grade</th>
+                                            <th class="text-end">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {% for result in results|slice:":10" %}
+                                        {% for result in recent_results %}
                                         <tr>
                                             <td>
                                                 <strong>{{ result.student_admission.student.first_name }} {{ result.student_admission.student.last_name }}</strong>
@@ -135,6 +228,14 @@
                                                     {{ result.grade }}
                                                 </span>
                                             </td>
+                                            <td class="text-end text-nowrap">
+                                                <a href="{% url 'result_edit' result.id %}" class="btn btn-sm btn-outline-warning" title="Edit">
+                                                    <i class="fas fa-edit" aria-hidden="true"></i>
+                                                </a>
+                                                <a href="{% url 'result_delete' result.id %}" class="btn btn-sm btn-outline-danger" title="Delete">
+                                                    <i class="fas fa-trash" aria-hidden="true"></i>
+                                                </a>
+                                            </td>
                                         </tr>
                                         {% endfor %}
                                     </tbody>
@@ -142,21 +243,20 @@
                             </div>
                         {% else %}
                             <div class="text-center py-5 text-muted">
-                                <i class="fas fa-file-alt fa-3x mb-3"></i>
-                                <p>No results recorded yet.</p>
+                                <i class="fas fa-file-alt fa-3x mb-3" aria-hidden="true"></i>
+                                <p class="mb-0">No results recorded yet for your subjects.</p>
                             </div>
                         {% endif %}
                     </div>
                 </div>
             </div>
 
-            <!-- Upcoming Events -->
             {% if events %}
             <div class="col-12">
                 <div class="card shadow-sm">
                     <div class="card-header bg-white">
-                        <h5 class="mb-0 d-flex align-items-center">
-                            <i class="fas fa-calendar-day text-warning me-2"></i>
+                        <h5 class="mb-0">
+                            <i class="fas fa-calendar-day text-warning me-2" aria-hidden="true"></i>
                             Upcoming Events
                         </h5>
                     </div>
@@ -164,13 +264,13 @@
                         <ul class="list-group list-group-flush">
                             {% for event in events %}
                             <li class="list-group-item">
-                                <div class="d-flex justify-content-between">
+                                <div class="d-flex justify-content-between gap-3">
                                     <div>
-                                        <strong>{{ event.event_type }}</strong>
+                                        <strong>{{ event.get_event_type_display }}</strong>
                                         <p class="text-muted small mb-0">{{ event.description|truncatewords:25 }}</p>
                                     </div>
-                                    <div class="text-end">
-                                        <small class="badge bg-light text-dark">{{ event.event_date|date:"d M" }}</small>
+                                    <div class="text-end flex-shrink-0">
+                                        <span class="badge bg-light text-dark">{{ event.event_date|date:"d M Y" }}</span>
                                     </div>
                                 </div>
                             </li>

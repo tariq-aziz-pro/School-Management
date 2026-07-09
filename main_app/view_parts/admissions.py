@@ -13,6 +13,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.lib import colors
+import json
 import logging
 
 from ..forms import StudentUserForm, StudentAdmissionForm, EditStudentForm
@@ -21,9 +22,14 @@ from ..permissions import school_staff_required, student_required, get_active_se
 
 from ..utils import (
     create_monthly_fees_for_student,
-    get_active_session,
     get_pending_balance,
     recalculate_monthly_chain,
+)
+from ..view_helpers import (
+    get_class_timetable_grid,
+    get_student_upcoming_events,
+    monthly_fee_status,
+    summarize_student_results,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,8 +54,13 @@ def student_user_create(request):
                     logger.error(f"No StudentAdmission for student: {student_id}, session: {active_session.session_name}")
                     return redirect('student_user_create')
 
-                user, plain_password = form.save()
-                messages.success(request, f"Student account for {user.username} created successfully. Temporary password: {plain_password} — please note it down now.")
+                user, plain_password = form.save(school=request.user.school)
+                messages.success(
+                    request,
+                    f"Student account for {user.username} created. "
+                    f"Username: {user.username} | Password: {plain_password} "
+                    f"(copy both exactly — login is case-sensitive).",
+                )
                 logger.info(f"Student account created by admin {request.user.username}: Username={user.username}")
                 return redirect('student_list')
             except Exception as e:
@@ -90,7 +101,11 @@ def student_list(request):
         admissions_page = paginator.get_page(1)
 
     student_ids = [adm.student.student_id for adm in admissions_page]
-    users = CustomUser.objects.filter(username__in=student_ids).select_related('temporary_password')
+    users = CustomUser.objects.filter(
+        username__in=student_ids,
+        user_type=5,
+        school=request.user.school,
+    ).select_related('temporary_password')
     user_map = {user.username: user for user in users}
 
     student_data = []
@@ -121,109 +136,190 @@ def student_list(request):
     return render(request, 'main_app/student_list.html', context)
 
 
+@school_staff_required
+def reset_student_password(request, student_id):
+    if request.method != 'POST':
+        return redirect('student_list')
+
+    student = get_object_or_404(Student, student_id=student_id, school=request.user.school)
+    user = get_object_or_404(
+        CustomUser,
+        username=student.student_id,
+        user_type=5,
+        school=request.user.school,
+    )
+    plain_password = TemporaryPassword.assign_to_user(user)
+    messages.success(
+        request,
+        f"Password reset for {user.username}. "
+        f"New password: {plain_password} (share with the student; login is case-sensitive).",
+    )
+    logger.info(f"Student password reset by {request.user.username} for {user.username}")
+    return redirect('student_list')
+
+
 @student_required
 def student_dashboard(request):
+    base_ctx = {
+        'student': None,
+        'admission': None,
+        'active_session': None,
+        'class_teacher': None,
+        'results': [],
+        'results_summary': None,
+        'exam_types': [],
+        'subjects': [],
+        'selected_exam_type': '',
+        'selected_subject': '',
+        'fees': [],
+        'fee_summary': None,
+        'syllabus': [],
+        'announcements': [],
+        'events': [],
+        'timetable': None,
+        'chart_data_json': '{}',
+    }
+
     try:
         student = Student.objects.select_related('school').get(
             student_id=request.user.username
         )
     except Student.DoesNotExist:
-        messages.error(request, "Student profile not found.")
-        return render(request, 'main_app/student_dashboard.html', {'student': None})
+        messages.error(request, "Student profile not found. Contact the school office.")
+        return render(request, 'main_app/student_dashboard.html', base_ctx)
+
+    if request.user.school_id and student.school_id != request.user.school_id:
+        messages.error(request, "Your login account is not linked to this student's school.")
+        return render(request, 'main_app/student_dashboard.html', base_ctx)
 
     active_session = get_active_session(request)
     if not active_session:
-        messages.error(request, "No active academic session found.")
-        return render(request, 'main_app/student_dashboard.html', {
-            'student': student,
-            'active_session': None
-        })
+        messages.warning(request, "No active academic session. Some information may be unavailable.")
+        ctx = {**base_ctx, 'student': student, 'active_session': None}
+        return render(request, 'main_app/student_dashboard.html', ctx)
 
     admission = StudentAdmission.objects.select_related(
         'student', 'academic_session'
     ).filter(
         student=student,
-        academic_session=active_session
+        academic_session=active_session,
+        status=True,
     ).first()
 
     if not admission:
-        messages.error(request, "No admission record found for the current session.")
-        return render(request, 'main_app/student_dashboard.html', {
-            'student': student,
-            'active_session': active_session
-        })
+        messages.warning(
+            request,
+            "No active admission found for the current session. Please contact the school office.",
+        )
+        ctx = {**base_ctx, 'student': student, 'active_session': active_session}
+        return render(request, 'main_app/student_dashboard.html', ctx)
 
-    exam_type_filter = request.GET.get('exam_type')
-    subject_filter = request.GET.get('subject')
+    exam_type_filter = (request.GET.get('exam_type') or '').strip()
+    subject_filter = (request.GET.get('subject') or '').strip()
 
-    results_qs = StudentResult.objects.filter(
+    all_results_qs = StudentResult.objects.filter(
         student_admission=admission
     ).select_related('subject')
 
+    exam_types = list(
+        all_results_qs.values_list('exam_type', flat=True).distinct().order_by('exam_type')
+    )
+    subjects = Subject.objects.filter(
+        id__in=all_results_qs.values_list('subject_id', flat=True).distinct()
+    ).order_by('name')
+
+    results_qs = all_results_qs
     if exam_type_filter:
         results_qs = results_qs.filter(exam_type=exam_type_filter)
     if subject_filter:
         results_qs = results_qs.filter(subject_id=subject_filter)
 
-    results = results_qs.order_by('subject__name', 'exam_type')
+    class_teacher = Teacher.objects.filter(
+        class_name=admission.class_name,
+        section=admission.section,
+        school=student.school,
+    ).only('name', 'contact').first()
+
+    teacher_name = class_teacher.name if class_teacher else 'Not assigned'
 
     result_data = []
     chart_labels = []
     chart_obtained = []
     chart_total = []
 
-    for result in results:
-        data = {
+    for result in results_qs.order_by('subject__name', 'exam_type'):
+        row = {
             'subject_name': result.subject.name,
             'exam_type': result.exam_type,
+            'teacher_name': teacher_name,
             'total_marks': result.total_marks,
             'obtained_marks': result.obtained_marks,
             'percentage': result.percentage,
             'grade': result.grade,
         }
-        result_data.append(data)
+        result_data.append(row)
         chart_labels.append(f"{result.subject.name} ({result.exam_type})")
-        chart_obtained.append(result.obtained_marks)
-        chart_total.append(result.total_marks)
+        chart_obtained.append(float(result.obtained_marks))
+        chart_total.append(float(result.total_marks))
 
-    class_teacher = Teacher.objects.filter(
-        class_name=admission.class_name,
-        section=admission.section,
-        school=student.school
-    ).only('name').first()
-
-    fees = MonthlyFee.objects.filter(
+    fees_qs = MonthlyFee.objects.filter(
         student_admission=admission
-    ).order_by('year', 'month')
+    ).order_by('year', 'month_number', 'month')
 
-    fee_data = [
-        {
+    fee_rows = []
+    total_outstanding = Decimal('0.00')
+    paid_count = 0
+    for fee in fees_qs:
+        status = monthly_fee_status(fee)
+        if status == 'Paid':
+            paid_count += 1
+        total_outstanding += fee.current_balance or Decimal('0.00')
+        fee_rows.append({
             'id': fee.id,
             'month': fee.month,
             'year': fee.year,
             'monthly_fee': fee.monthly_fee,
             'transport_fee': fee.transport_fee or Decimal('0'),
+            'line_total': (fee.monthly_fee or Decimal('0')) + (fee.transport_fee or Decimal('0')),
             'total_dues': fee.total_dues,
             'received': fee.received,
             'current_balance': fee.current_balance,
-            'status': 'Paid' if fee.has_payment or fee.current_balance <= 0 else 'Unpaid',
+            'status': status,
             'payment_date': fee.payment_date,
-        } for fee in fees
-    ]
+            'can_download_receipt': (fee.received or 0) > 0,
+        })
+
+    fee_summary = {
+        'total_months': len(fee_rows),
+        'paid_count': paid_count,
+        'outstanding': total_outstanding,
+    }
 
     syllabus = Syllabus.objects.filter(
+        school=student.school,
         academic_session=active_session,
-        class_name=admission.class_name
-    ).select_related('subject', 'uploaded_by')
+        class_name=admission.class_name,
+    ).select_related('subject', 'uploaded_by').order_by('subject__name')
 
     announcements = Announcement.objects.filter(
-        school=student.school
+        school=student.school,
+        is_active=True,
     ).order_by('-created_at')[:5]
 
-    events = Events.objects.filter(
-        school=student.school,
-        event_for__in=['All', 'Students']
-    ).order_by('event_date')[:8]
+    events = list(get_student_upcoming_events(student.school, limit=8))
+
+    timetable = get_class_timetable_grid(
+        student.school,
+        active_session,
+        admission.class_name,
+        admission.section,
+    )
+
+    chart_payload = {
+        'labels': chart_labels,
+        'obtained_marks': chart_obtained,
+        'total_marks': chart_total,
+    }
 
     context = {
         'student': student,
@@ -231,21 +327,18 @@ def student_dashboard(request):
         'class_teacher': class_teacher,
         'active_session': active_session,
         'results': result_data,
-        'exam_types': results_qs.values_list('exam_type', flat=True).distinct(),
-        'subjects': Subject.objects.filter(
-            studentresult__student_admission=admission
-        ).distinct(),
+        'results_summary': summarize_student_results(result_data),
+        'exam_types': exam_types,
+        'subjects': subjects,
         'selected_exam_type': exam_type_filter,
         'selected_subject': subject_filter,
-        'fees': fee_data,
+        'fees': fee_rows,
+        'fee_summary': fee_summary,
         'syllabus': syllabus,
         'announcements': announcements,
         'events': events,
-        'chart_data': {
-            'labels': chart_labels,
-            'obtained_marks': chart_obtained,
-            'total_marks': chart_total,
-        },
+        'timetable': timetable,
+        'chart_data_json': json.dumps(chart_payload),
     }
 
     return render(request, 'main_app/student_dashboard.html', context)

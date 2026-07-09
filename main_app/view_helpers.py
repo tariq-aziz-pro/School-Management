@@ -3,8 +3,20 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import Max
 from django.db.models.functions import Coalesce
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
-from .models import AcademicSession, FeeStructure, MonthlyFee, StudentAdmission, CLASS_PROGRESSION
+from .models import (
+    AcademicSession,
+    Events,
+    FeeStructure,
+    MonthlyFee,
+    Period,
+    StudentAdmission,
+    StudentResult,
+    Timetable,
+    CLASS_PROGRESSION,
+)
 
 
 def get_previous_balance(student_admission, active_session):
@@ -239,3 +251,148 @@ def calculate_overall_grade(percentage):
     if percentage >= 50:
         return 'D'
     return 'F'
+
+
+def get_teacher_class_admissions(teacher, active_session):
+    """Active admissions in the teacher's assigned class/section for the given session."""
+    if not active_session:
+        return StudentAdmission.objects.none()
+    return StudentAdmission.objects.filter(
+        student__school=teacher.school,
+        class_name=teacher.class_name,
+        section=teacher.section,
+        academic_session=active_session,
+        status=True,
+    ).select_related('student')
+
+
+def get_teacher_managed_results(teacher, active_session=None):
+    """Results the teacher may view or manage (own subjects + class/section)."""
+    qs = StudentResult.objects.filter(
+        student_admission__student__school=teacher.school,
+        student_admission__class_name=teacher.class_name,
+        student_admission__section=teacher.section,
+        student_admission__status=True,
+        subject__in=teacher.subjects.all(),
+    ).select_related('student_admission__student', 'subject')
+    if active_session:
+        qs = qs.filter(student_admission__academic_session=active_session)
+    return qs
+
+
+def get_teacher_managed_result(teacher, result_id, active_session=None):
+    """Single result row scoped to this teacher's subjects and class."""
+    return get_object_or_404(
+        get_teacher_managed_results(teacher, active_session=active_session),
+        pk=result_id,
+    )
+
+
+def get_teacher_upcoming_events(school, limit=8):
+    """School events for teachers on or after today."""
+    return Events.objects.filter(
+        school=school,
+        event_for__in=['All', 'Teacher'],
+        event_date__gte=timezone.localdate(),
+    ).order_by('event_date')[:limit]
+
+
+def get_student_upcoming_events(school, limit=8):
+    return Events.objects.filter(
+        school=school,
+        event_for__in=['All', 'Students'],
+        event_date__gte=timezone.localdate(),
+    ).order_by('event_date')[:limit]
+
+
+def get_class_timetable_grid(school, active_session, class_name, section):
+    """Read-only timetable grid for a class/section (admin-created slots)."""
+    if not school or not active_session or not class_name or not section:
+        return None
+
+    periods = list(Period.objects.filter(school=school).order_by('order'))
+    if not periods:
+        return {
+            'class_name': class_name,
+            'section': section,
+            'grid': [],
+            'has_entries': False,
+            'period_count': 0,
+        }
+
+    slots = Timetable.objects.filter(
+        school=school,
+        academic_session=active_session,
+        class_name=class_name,
+        section=section,
+    ).select_related('period', 'subject', 'teacher')
+
+    slot_map = {slot.period_id: slot for slot in slots}
+
+    grid = []
+    has_entries = False
+    for period in periods:
+        slot = slot_map.get(period.id)
+        if slot and (slot.subject_id or slot.teacher_id):
+            has_entries = True
+        grid.append({
+            'period': period,
+            'slot': slot,
+            'subject_name': slot.subject.name if slot and slot.subject else None,
+            'teacher_name': slot.teacher.name if slot and slot.teacher else None,
+            'teacher_id': slot.teacher_id if slot else None,
+            'is_break': period.is_break,
+        })
+
+    return {
+        'class_name': class_name,
+        'section': section,
+        'grid': grid,
+        'has_entries': has_entries,
+        'period_count': len(periods),
+    }
+
+
+def get_teacher_timetable_assignments(teacher, active_session):
+    """All timetable slots where this teacher is assigned (any class)."""
+    if not teacher or not active_session:
+        return []
+    return list(
+        Timetable.objects.filter(
+            school=teacher.school,
+            academic_session=active_session,
+            teacher=teacher,
+        )
+        .select_related('period', 'subject')
+        .order_by('class_name', 'section', 'period__order')
+    )
+
+
+def monthly_fee_status(fee):
+    """Paid / Partial / Unpaid for student-facing fee cards."""
+    balance = fee.current_balance or Decimal('0')
+    received = fee.received or Decimal('0')
+    if balance <= 0:
+        return 'Paid'
+    if received > 0:
+        return 'Partial'
+    return 'Unpaid'
+
+
+def summarize_student_results(result_rows):
+    """Overall marks across displayed results (list of dicts with obtained/total)."""
+    if not result_rows:
+        return None
+    total_obtained = sum(r['obtained_marks'] for r in result_rows)
+    total_marks = sum(r['total_marks'] for r in result_rows)
+    if total_marks <= 0:
+        return None
+    percentage = (total_obtained / total_marks) * 100
+    return {
+        'total_obtained': total_obtained,
+        'total_marks': total_marks,
+        'percentage': percentage,
+        'grade': calculate_overall_grade(percentage),
+        'count': len(result_rows),
+    }
+

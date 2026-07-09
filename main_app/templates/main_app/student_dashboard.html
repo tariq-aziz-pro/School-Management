@@ -7,7 +7,7 @@
 <div class="mb-4">
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb mb-0">
-            <li class="breadcrumb-item active">Student Dashboard</li>
+            <li class="breadcrumb-item active">My Dashboard</li>
         </ol>
     </nav>
 </div>
@@ -16,342 +16,394 @@
 {% block content %}
 <div class="content-area">
 
-    <!-- Student Profile Header -->
+    {% if not student %}
+        <div class="card shadow-sm border-0">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-user-slash fa-3x text-muted mb-3" aria-hidden="true"></i>
+                <h5 class="fw-bold">Profile unavailable</h5>
+                <p class="text-muted mb-0">We could not load your student record. Please contact the school office.</p>
+            </div>
+        </div>
+    {% else %}
+
+    <!-- Profile header -->
     <div class="card shadow-sm mb-4 border-0 overflow-hidden">
         <div class="card-body p-4">
-            <div class="row align-items-center">
+            <div class="row align-items-center g-3">
                 <div class="col-auto">
                     {% if student.image %}
-                        <img src="{{ student.image.url }}" alt="{{ student.first_name }}" 
-                             class="rounded-circle border border-3 border-white shadow-sm" 
+                        <img src="{{ student.image.url }}" alt="{{ student.first_name }}"
+                             class="rounded-circle border border-3 border-white shadow-sm"
                              width="90" height="90" style="object-fit: cover;">
                     {% else %}
-                        <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center" 
+                        <div class="rounded-circle bg-primary bg-opacity-10 d-flex align-items-center justify-content-center"
                              style="width: 90px; height: 90px;">
-                            <i class="fas fa-user fa-3x text-primary"></i>
+                            <i class="fas fa-user fa-3x text-primary" aria-hidden="true"></i>
                         </div>
                     {% endif %}
                 </div>
                 <div class="col">
-                    <h3 class="fw-bold mb-1">
-                        Welcome back, {{ student.first_name }} {{ student.last_name }}!
-                    </h3>
-                    <p class="text-muted mb-2">
-                        {{ student.school.school_name }} • 
-                        <strong>Class {{ admission.class_name }} {{ admission.section }}</strong>
+                    <h3 class="fw-bold mb-1">Welcome, {{ student.first_name }} {{ student.last_name }}</h3>
+                    <p class="text-muted mb-1">
+                        {{ student.school.school_name }}
+                        {% if admission %}
+                            • <strong>Class {{ admission.class_name }} {{ admission.section }}</strong>
+                            • Roll <strong>{{ admission.roll_number }}</strong>
+                        {% endif %}
                     </p>
                     {% if class_teacher %}
-                        <p class="mb-0 text-muted">
-                            <i class="fas fa-chalkboard-teacher"></i> Class Teacher: 
-                            <strong>{{ class_teacher.name }}</strong>
+                        <p class="mb-0 small text-muted">
+                            <i class="fas fa-chalkboard-teacher me-1" aria-hidden="true"></i>
+                            Class teacher: <strong>{{ class_teacher.name }}</strong>
                         </p>
                     {% endif %}
                 </div>
                 <div class="col-auto text-end">
                     {% if active_session %}
-                        <span class="badge bg-success fs-6 px-3 py-2">
-                            {{ active_session.session_name }}
-                        </span>
+                        <span class="badge bg-success fs-6 px-3 py-2">{{ active_session.session_name }}</span>
+                    {% else %}
+                        <span class="badge bg-warning text-dark fs-6 px-3 py-2">No active session</span>
                     {% endif %}
                 </div>
             </div>
         </div>
     </div>
 
-    {% if messages %}
-        {% for message in messages %}
-            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        {% endfor %}
-    {% endif %}
-
     {% if not admission %}
         <div class="alert alert-warning">
-            No admission record found for the current session. Please contact the school administration.
+            <strong>No active enrollment</strong> for the current session. Fee and result information will appear once the school confirms your admission.
         </div>
     {% else %}
 
-        <div class="row g-4">
-
-            <!-- Results Section -->
-            <div class="col-12">
-                <div class="card shadow-sm" id="results">
-                    <div class="card-header bg-white">
-                        <h5 class="mb-0 d-flex align-items-center">
-                            <i class="fas fa-chart-bar text-primary me-2"></i>
-                            Academic Results - {{ active_session.session_name }}
-                        </h5>
-                    </div>
-                    <div class="card-body">
-
-                        <!-- Filters -->
-                        <form method="get" class="row g-3 mb-4">
-                            <div class="col-md-5">
-                                <select name="exam_type" class="form-select" onchange="this.form.submit()">
-                                    <option value="">All Exam Types</option>
-                                    {% for exam_type in exam_types %}
-                                        <option value="{{ exam_type }}" {% if selected_exam_type == exam_type %}selected{% endif %}>
-                                            {{ exam_type }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-5">
-                                <select name="subject" class="form-select" onchange="this.form.submit()">
-                                    <option value="">All Subjects</option>
-                                    {% for subject in subjects %}
-                                        <option value="{{ subject.id }}" {% if selected_subject == subject.id|stringformat:"s" %}selected{% endif %}>
-                                            {{ subject.name }}
-                                        </option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="col-md-2">
-                                <a href="{% url 'generate_results_pdf' %}?exam_type={{ selected_exam_type|urlencode }}&subject={{ selected_subject|urlencode }}" 
-                                   class="btn btn-primary w-100">
-                                    <i class="fas fa-download"></i> PDF
-                                </a>
-                            </div>
-                        </form>
-
-                        {% if results %}
-                            <!-- Chart -->
-                            <div class="mb-4">
-                                <canvas id="resultsChart" height="110"></canvas>
-                            </div>
-
-                            <!-- Results Table -->
-                            <div class="table-responsive">
-                                <table class="table table-hover align-middle">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Subject</th>
-                                            <th>Exam Type</th>
-                                            <th>Teacher</th>
-                                            <th class="text-end">Obtained</th>
-                                            <th class="text-end">Total</th>
-                                            <th class="text-end">Percentage</th>
-                                            <th class="text-center">Grade</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {% for result in results %}
-                                        <tr>
-                                            <td><strong>{{ result.subject_name }}</strong></td>
-                                            <td>{{ result.exam_type }}</td>
-                                            <td>{{ result.teacher_name }}</td>
-                                            <td class="text-end fw-medium">{{ result.obtained_marks }}</td>
-                                            <td class="text-end">{{ result.total_marks }}</td>
-                                            <td class="text-end">{{ result.percentage|floatformat:1 }}%</td>
-                                            <td class="text-center">
-                                                <span class="badge {% if result.grade == 'A+' or result.grade == 'A' %}bg-success{% elif result.grade == 'B+' or result.grade == 'B' %}bg-info{% elif result.grade == 'F' %}bg-danger{% else %}bg-warning{% endif %}">
-                                                    {{ result.grade }}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                        {% endfor %}
-                                    </tbody>
-                                </table>
-                            </div>
-                        {% else %}
-                            <div class="text-center py-5 text-muted">
-                                <i class="fas fa-file-alt fa-3x mb-3"></i>
-                                <p class="mb-0">No results available yet.</p>
-                            </div>
-                        {% endif %}
+    <!-- Quick stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-3">
+                    <div class="text-muted small">Student ID</div>
+                    <div class="fw-bold">{{ student.student_id }}</div>
+                </div>
+            </div>
+        </div>
+        {% if results_summary %}
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-3">
+                    <div class="text-muted small">Overall (filtered)</div>
+                    <div class="fw-bold">{{ results_summary.percentage|floatformat:1 }}% <span class="badge bg-primary">{{ results_summary.grade }}</span></div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        {% if fee_summary %}
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-3">
+                    <div class="text-muted small">Fee balance</div>
+                    <div class="fw-bold {% if fee_summary.outstanding > 0 %}text-danger{% else %}text-success{% endif %}">
+                        Rs {{ fee_summary.outstanding|floatformat:0 }}
                     </div>
                 </div>
             </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card h-100 border-0 shadow-sm">
+                <div class="card-body text-center py-3">
+                    <div class="text-muted small">Months paid</div>
+                    <div class="fw-bold">{{ fee_summary.paid_count }} / {{ fee_summary.total_months }}</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
 
-            <!-- Monthly Fees -->
-            <div class="col-12">
-                <div class="card shadow-sm" id="fees">
-                    <div class="card-header bg-white">
-                        <h5 class="mb-0 d-flex align-items-center">
-                            <i class="fas fa-hand-holding-usd text-success me-2"></i>
-                            Monthly Fees
-                        </h5>
+    <!-- Section jump links -->
+    <nav class="nav nav-pills flex-wrap gap-2 mb-4" aria-label="Dashboard sections">
+        <a class="nav-link active" href="#results">Results</a>
+        <a class="nav-link" href="#fees">Fees</a>
+        {% if timetable %}<a class="nav-link" href="#timetable">Timetable</a>{% endif %}
+        {% if syllabus %}<a class="nav-link" href="#syllabus">Syllabus</a>{% endif %}
+        {% if events %}<a class="nav-link" href="#events">Events</a>{% endif %}
+        {% if announcements %}<a class="nav-link" href="#announcements">Notices</a>{% endif %}
+    </nav>
+
+    <div class="row g-4">
+
+        <!-- Announcements -->
+        {% if announcements %}
+        <div class="col-12" id="announcements">
+            <div class="card shadow-sm border-start border-4 border-info">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="fas fa-bullhorn text-info me-2" aria-hidden="true"></i> School notices</h5>
+                </div>
+                <div class="list-group list-group-flush">
+                    {% for note in announcements %}
+                    <div class="list-group-item">
+                        <h6 class="fw-semibold mb-1">{{ note.title }}</h6>
+                        <p class="text-muted small mb-1">{{ note.content|truncatewords:40 }}</p>
+                        <small class="text-muted">{{ note.created_at|date:"d M Y" }}</small>
                     </div>
-                    <div class="card-body">
-                        {% if fees %}
-                            <div class="row g-3">
-                                {% for fee in fees %}
-                                <div class="col-md-6 col-lg-4">
-                                    <div class="card h-100 border">
-                                        <div class="card-body">
-                                            <div class="d-flex justify-content-between align-items-start">
-                                                <h6 class="fw-bold">{{ fee.month }} {{ fee.year }}</h6>
-                                                <span class="badge {% if fee.status == 'Paid' %}bg-success{% else %}bg-warning{% endif %}">
-                                                    {{ fee.status }}
-                                                </span>
-                                            </div>
-                                            <hr>
-                                            <p class="mb-1"><strong>Total Dues:</strong> Rs {{ fee.total_dues|floatformat:0 }}</p>
-                                            <p class="mb-1"><strong>Received:</strong> Rs {{ fee.received|floatformat:0 }}</p>
-                                            <p class="mb-0 text-danger fw-bold">Balance: Rs {{ fee.current_balance|floatformat:0 }}</p>
-                                        </div>
-                                        <div class="card-footer bg-light">
-                                            <a href="{% url 'monthly_fee_pdf' fee.id %}" class="btn btn-sm btn-outline-primary w-100">
-                                                <i class="fas fa-download"></i> Download Receipt
-                                            </a>
-                                        </div>
-                                    </div>
-                                </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Timetable -->
+        {% if timetable %}
+        <div class="col-12">
+            {% include 'main_app/partials/timetable_readonly.html' with timetable=timetable show_teacher_column=True %}
+        </div>
+        {% endif %}
+
+        <!-- Results -->
+        <div class="col-12">
+            <div class="card shadow-sm" id="results">
+                <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar text-primary me-2" aria-hidden="true"></i>
+                        My results
+                        {% if active_session %}<span class="text-muted fw-normal small">— {{ active_session.session_name }}</span>{% endif %}
+                    </h5>
+                    {% if results_summary %}
+                        <span class="badge bg-light text-dark">
+                            {{ results_summary.count }} record{{ results_summary.count|pluralize }}
+                            • {{ results_summary.total_obtained|floatformat:0 }}/{{ results_summary.total_marks|floatformat:0 }} marks
+                        </span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    <form method="get" class="row g-2 mb-4 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label small text-muted">Exam type</label>
+                            <select name="exam_type" class="form-select form-select-sm" onchange="this.form.submit()">
+                                <option value="">All exam types</option>
+                                {% for et in exam_types %}
+                                    <option value="{{ et }}" {% if selected_exam_type == et %}selected{% endif %}>{{ et }}</option>
                                 {% endfor %}
-                            </div>
-                        {% else %}
-                            <p class="text-muted text-center py-5">No fee records available yet.</p>
-                        {% endif %}
-                    </div>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small text-muted">Subject</label>
+                            <select name="subject" class="form-select form-select-sm" onchange="this.form.submit()">
+                                <option value="">All subjects</option>
+                                {% for subject in subjects %}
+                                    <option value="{{ subject.id }}" {% if selected_subject == subject.id|stringformat:"s" %}selected{% endif %}>{{ subject.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 d-flex gap-2">
+                            <a href="{% url 'student_dashboard' %}#results" class="btn btn-outline-secondary btn-sm">Clear</a>
+                            <a href="{% url 'generate_results_pdf' %}?exam_type={{ selected_exam_type|urlencode }}&subject={{ selected_subject|urlencode }}"
+                               class="btn btn-primary btn-sm ms-auto">
+                                <i class="fas fa-file-pdf me-1" aria-hidden="true"></i> Download DMC
+                            </a>
+                        </div>
+                    </form>
+
+                    {% if results %}
+                        <div class="mb-4" style="height: 220px;">
+                            <canvas id="resultsChart" aria-label="Results chart"></canvas>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Subject</th>
+                                        <th>Exam</th>
+                                        <th class="text-end">Obtained</th>
+                                        <th class="text-end">Total</th>
+                                        <th class="text-end">%</th>
+                                        <th class="text-center">Grade</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for result in results %}
+                                    <tr>
+                                        <td><strong>{{ result.subject_name }}</strong></td>
+                                        <td>{{ result.exam_type }}</td>
+                                        <td class="text-end fw-medium">{{ result.obtained_marks|floatformat:1 }}</td>
+                                        <td class="text-end">{{ result.total_marks|floatformat:1 }}</td>
+                                        <td class="text-end">{{ result.percentage|floatformat:1 }}%</td>
+                                        <td class="text-center">
+                                            <span class="badge {% if result.grade == 'A+' or result.grade == 'A' %}bg-success{% elif result.grade == 'F' %}bg-danger{% else %}bg-info{% endif %}">
+                                                {{ result.grade }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-5 text-muted">
+                            <i class="fas fa-file-alt fa-3x mb-3 opacity-50" aria-hidden="true"></i>
+                            <p class="mb-0">No results published yet{% if selected_exam_type or selected_subject %} for this filter{% endif %}.</p>
+                        </div>
+                    {% endif %}
                 </div>
             </div>
+        </div>
 
-            <!-- Syllabus & Events can be added later if needed -->
-
-                        <!-- Syllabus Section -->
-            {% if syllabus %}
-            <div class="col-12" id="syllabus">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-white">
-                        <h5 class="mb-0 d-flex align-items-center">
-                            <i class="fas fa-book-open text-info me-2"></i>
-                            Syllabus & Study Material
-                        </h5>
-                    </div>
-                    <div class="card-body">
+        <!-- Fees -->
+        <div class="col-12" id="fees">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="fas fa-hand-holding-usd text-success me-2" aria-hidden="true"></i> Fee history</h5>
+                    {% if fee_summary and fee_summary.outstanding > 0 %}
+                        <span class="badge bg-danger">Outstanding: Rs {{ fee_summary.outstanding|floatformat:0 }}</span>
+                    {% elif fee_summary %}
+                        <span class="badge bg-success">All clear</span>
+                    {% endif %}
+                </div>
+                <div class="card-body">
+                    {% if fees %}
                         <div class="row g-3">
-                            {% for item in syllabus %}
+                            {% for fee in fees %}
                             <div class="col-md-6 col-lg-4">
-                                <div class="card h-100 border-0 shadow-sm hover-shadow">
+                                <div class="card h-100 border {% if fee.status == 'Unpaid' %}border-warning{% elif fee.status == 'Partial' %}border-info{% else %}border-success-subtle{% endif %}">
                                     <div class="card-body">
-                                        <div class="d-flex justify-content-between align-items-start mb-3">
-                                            <h6 class="fw-bold mb-0">{{ item.subject.name }}</h6>
-                                            <small class="badge bg-light text-dark">
-                                                {{ item.class_name }}
-                                            </small>
+                                        <div class="d-flex justify-content-between align-items-start mb-2">
+                                            <h6 class="fw-bold mb-0">{{ fee.month }} {{ fee.year }}</h6>
+                                            <span class="badge {% if fee.status == 'Paid' %}bg-success{% elif fee.status == 'Partial' %}bg-info{% else %}bg-warning text-dark{% endif %}">
+                                                {{ fee.status }}
+                                            </span>
                                         </div>
-                                        
-                                        {% if item.description %}
-                                            <p class="text-muted small mb-3" style="line-height: 1.4;">
-                                                {{ item.description|truncatewords:35 }}
-                                            </p>
-                                        {% else %}
-                                            <p class="text-muted small mb-3">No description provided.</p>
-                                        {% endif %}
-
-                                        <div class="d-flex align-items-center text-muted small mb-3">
-                                            <i class="fas fa-user me-2"></i>
-                                            Uploaded by: 
-                                            <strong class="ms-1">
-                                                {{ item.uploaded_by.get_full_name|default:item.uploaded_by.username }}
-                                            </strong>
-                                        </div>
-
-                                        {% if item.file %}
-                                            <a href="{{ item.file.url }}" 
-                                               class="btn btn-sm btn-outline-primary w-100"
-                                               target="_blank">
-                                                <i class="fas fa-download me-1"></i> Download File
-                                            </a>
-                                        {% else %}
-                                            <button class="btn btn-sm btn-secondary w-100" disabled>
-                                                No file attached
-                                            </button>
-                                        {% endif %}
+                                        <dl class="small mb-0">
+                                            <div class="d-flex justify-content-between"><dt class="text-muted">Tuition + transport</dt><dd class="mb-1">Rs {{ fee.line_total|floatformat:0 }}</dd></div>
+                                            <div class="d-flex justify-content-between"><dt class="text-muted">Total dues</dt><dd class="mb-1">Rs {{ fee.total_dues|floatformat:0 }}</dd></div>
+                                            <div class="d-flex justify-content-between"><dt class="text-muted">Paid</dt><dd class="mb-1">Rs {{ fee.received|floatformat:0 }}</dd></div>
+                                            <div class="d-flex justify-content-between fw-semibold {% if fee.current_balance > 0 %}text-danger{% endif %}">
+                                                <dt>Balance</dt><dd class="mb-0">Rs {{ fee.current_balance|floatformat:0 }}</dd>
+                                            </div>
+                                        </dl>
                                     </div>
+                                    {% if fee.can_download_receipt %}
+                                    <div class="card-footer bg-light py-2">
+                                        <a href="{% url 'monthly_fee_pdf' fee.id %}" class="btn btn-sm btn-outline-primary w-100" target="_blank" rel="noopener">
+                                            <i class="fas fa-receipt me-1" aria-hidden="true"></i> Receipt (PDF)
+                                        </a>
+                                    </div>
+                                    {% endif %}
                                 </div>
                             </div>
                             {% endfor %}
                         </div>
-                    </div>
+                    {% else %}
+                        <p class="text-muted text-center py-5 mb-0">No fee records for this session yet.</p>
+                    {% endif %}
                 </div>
             </div>
-            {% endif %}
-
-                        <!-- Events Section -->
-            {% if events %}
-            <div class="col-12" id="events">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            <i class="fas fa-calendar-day text-warning me-2"></i>
-                            Upcoming Events
-                        </h5>
-                        
-                    </div>
-                    <div class="card-body p-0">
-                        <ul class="list-group list-group-flush">
-                            {% for event in events %}
-                            <li class="list-group-item border-0 py-3 px-4">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <h6 class="fw-bold mb-1">{{ event.event_type }}</h6>
-                                        <p class="text-muted small mb-1">
-                                            {{ event.description|truncatewords:30 }}
-                                        </p>
-                                        <small class="text-muted">
-                                            <i class="fas fa-user"></i> 
-                                            {{ event.arranged_by|default:"School Administration" }}
-                                        </small>
-                                    </div>
-                                    <div class="text-end">
-                                        <span class="badge bg-light text-dark">
-                                            {{ event.event_date|date:"d M" }}
-                                        </span>
-                                        {% if event.event_for != 'All' %}
-                                            <small class="d-block text-muted mt-1">{{ event.event_for }}</small>
-                                        {% endif %}
-                                    </div>
-                                </div>
-                            </li>
-                            {% endfor %}
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            {% endif %}
-
         </div>
+
+        <!-- Syllabus -->
+        {% if syllabus %}
+        <div class="col-12" id="syllabus">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="fas fa-book-open text-info me-2" aria-hidden="true"></i> Syllabus & materials</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        {% for item in syllabus %}
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 border-0 bg-light">
+                                <div class="card-body">
+                                    <h6 class="fw-bold">{{ item.subject.name }}</h6>
+                                    {% if item.description %}
+                                        <p class="text-muted small">{{ item.description|truncatewords:30 }}</p>
+                                    {% endif %}
+                                    {% if item.file %}
+                                        <a href="{{ item.file.url }}" class="btn btn-sm btn-outline-primary w-100" target="_blank" rel="noopener">
+                                            <i class="fas fa-download me-1" aria-hidden="true"></i> Download
+                                        </a>
+                                    {% else %}
+                                        <span class="text-muted small">No file attached</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Events -->
+        {% if events %}
+        <div class="col-12" id="events">
+            <div class="card shadow-sm">
+                <div class="card-header bg-white">
+                    <h5 class="mb-0"><i class="fas fa-calendar-day text-warning me-2" aria-hidden="true"></i> Upcoming events</h5>
+                </div>
+                <ul class="list-group list-group-flush">
+                    {% for event in events %}
+                    <li class="list-group-item">
+                        <div class="d-flex justify-content-between gap-3">
+                            <div>
+                                <strong>{{ event.get_event_type_display }}</strong>
+                                <p class="text-muted small mb-0">{{ event.description|truncatewords:25 }}</p>
+                            </div>
+                            <span class="badge bg-light text-dark flex-shrink-0">{{ event.event_date|date:"d M Y" }}</span>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+    {% endif %}
     {% endif %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{{ chart_data_json|json_script:"student-chart-data" }}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const ctx = document.getElementById('resultsChart');
-    
-    if (ctx && {{ chart_data.labels|length }} > 0) {
-        new Chart(ctx.getContext('2d'), {
-            type: 'bar',
-            data: {
-                labels: {{ chart_data.labels|safe }},
-                datasets: [
-                    {
-                        label: 'Obtained Marks',
-                        data: {{ chart_data.obtained_marks|safe }},
-                        backgroundColor: '#1e88e5'
-                    },
-                    {
-                        label: 'Total Marks',
-                        data: {{ chart_data.total_marks|safe }},
-                        backgroundColor: '#43a047'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: { beginAtZero: true }
+    const el = document.getElementById('resultsChart');
+    const dataEl = document.getElementById('student-chart-data');
+    if (!el || !dataEl) return;
+
+    const chartData = JSON.parse(dataEl.textContent);
+    if (!chartData.labels || chartData.labels.length === 0) return;
+
+    new Chart(el, {
+        type: 'bar',
+        data: {
+            labels: chartData.labels,
+            datasets: [
+                {
+                    label: 'Obtained',
+                    data: chartData.obtained_marks,
+                    backgroundColor: 'rgba(30, 136, 229, 0.85)',
+                    borderRadius: 4,
                 },
-                plugins: {
-                    legend: { position: 'top' }
+                {
+                    label: 'Total',
+                    data: chartData.total_marks,
+                    backgroundColor: 'rgba(67, 160, 71, 0.55)',
+                    borderRadius: 4,
                 }
-            }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'top' } },
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+
+    // Highlight nav pill for hash sections
+    const hash = window.location.hash;
+    if (hash) {
+        document.querySelectorAll('.nav-pills .nav-link').forEach(function (link) {
+            link.classList.toggle('active', link.getAttribute('href') === hash);
         });
     }
 });

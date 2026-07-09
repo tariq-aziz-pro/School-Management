@@ -1,20 +1,16 @@
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth import login
 from django.contrib.auth.forms import AuthenticationForm
+from ..forms import LoginForm
 from django.contrib import messages
-from django.db.models import Q, Sum, Count
-from django.db import transaction
+
 import logging
 
 from ..forms import SchoolRegisterForm, AcademicSessionForm, FeeStructureForm, SchoolSubscriptionForm
 from ..models import School, SchoolSubscription, AcademicSession, FeeStructure, StudentAdmission, MonthlyFee, Teacher, Staff, Expenses
-from ..permissions import (
-    developer_required,
-    get_active_session,
-    is_developer,
-    is_school_staff,
-    school_staff_required,
-)
+
+
+from ..permissions import role_home_url
 
 logger = logging.getLogger(__name__)
 
@@ -24,48 +20,38 @@ def custom_login(request):
         logger.info(
             f"Already authenticated user {request.user.username} (Type: {request.user.user_type}) redirected."
         )
+        return redirect(role_home_url(request.user))
 
-        if is_developer(request.user) and request.user.user_type != 1:
-            return redirect("developer_dashboard")
-        elif is_school_staff(request.user):
-            return redirect("dashboard")
-        elif request.user.user_type == 4:
-            return redirect("teacher_dashboard")
-        elif request.user.user_type == 5:
-            return redirect("student_dashboard")
-        else:
-            return redirect("index")
+    active_role = request.POST.get('role') or request.GET.get('role') or LoginForm.ROLE_STAFF
 
     if request.method == "POST":
-        form = AuthenticationForm(request, data=request.POST)
+        form = LoginForm(request, data=request.POST)
         if form.is_valid():
             user = form.get_user()
+            if not getattr(user, 'is_active', False):
+                messages.error(request, 'Your account is inactive. Please contact the administrator.')
+                return render(request, 'main_app/login.html', {'form': form, 'active_role': active_role})
+
             login(request, user)
-            logger.info(
-                f"Login successful: {user.username} (Type: {user.user_type})"
-            )
+            logger.info(f"Login successful: {user.username} (Type: {user.user_type}, Tab: {active_role})")
 
             next_url = request.GET.get("next")
             if next_url and next_url != "/logout/" and next_url.startswith("/"):
                 return redirect(next_url)
 
-            if is_developer(user) and user.user_type != 1:
-                return redirect("developer_dashboard")
-            elif is_school_staff(user):
-                return redirect("dashboard")
-            elif user.user_type == 4:
-                return redirect("teacher_dashboard")
-            elif user.user_type == 5:
-                return redirect("student_dashboard")
-            else:
-                return redirect("index")
+            return redirect(role_home_url(user))
         else:
-            messages.error(request, "Invalid username or password.")
+            role_mismatch = any(
+                getattr(err, 'code', None) == 'role_mismatch'
+                for err in form.non_field_errors().as_data()
+            )
+            if not role_mismatch:
+                messages.error(request, 'We could not sign you in. Please check your username and password and try again.')
             logger.warning(f"Login failed: {form.errors}")
     else:
-        form = AuthenticationForm()
+        form = LoginForm(request, initial={'role': active_role})
 
-    return render(request, "main_app/login.html", {"form": form})
+    return render(request, "main_app/login.html", {"form": form, "active_role": active_role})
 
 
 def developer_dashboard(request):
@@ -147,14 +133,14 @@ def register_school(request):
             try:
                 user = form.save()
                 login(request, user)
-                messages.success(request, f"School '{user.school.school_name}' registered successfully.")
+                messages.success(request, f"School '{user.school.school_name}' registered successfully. You can now continue to the dashboard.")
                 logger.info(f"School registered: Username={user.username}, School={user.school.school_name}")
                 return redirect('dashboard')
             except Exception as e:
-                messages.error(request, f"Failed to register school: {str(e)}")
+                messages.error(request, f"We could not complete registration. Please try again. ({str(e)})")
                 logger.error(f"Registration error: {str(e)}")
         else:
-            messages.error(request, 'Please correct the errors below.')
+            messages.error(request, 'Please correct the highlighted errors below.')
             logger.debug(f"Form errors: {form.errors}")
     else:
         form = SchoolRegisterForm()

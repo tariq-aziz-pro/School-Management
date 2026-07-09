@@ -33,44 +33,108 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
 
-    // ====================== DISABLE MOUSE WHEEL ON NUMBER FIELDS ======================
-    function disableMouseWheel() {
-        const numberInputs = document.querySelectorAll('input[type="number"]');
-        numberInputs.forEach(input => {
-            input.addEventListener('wheel', function(e) {
-                e.preventDefault();
-                this.blur();                    // Remove focus to prevent change
-            }, { passive: false });
+    const expenseTypeSelect = document.getElementById('id_expense_type');
+    const expenseNameSelect = document.getElementById('id_expense_name');
+    const periodSelect = document.getElementById('id_period');
+    const periodLabel = document.querySelector('label[for="id_period"]');
+
+    // Define choices (must match your model)
+    const dailyNames = [
+        {value: 'Food', text: 'Food'},
+        {value: 'Stationary', text: 'Stationary'},
+        {value: 'Other', text: 'Other'}
+    ];
+
+    const monthlyNames = [
+        {value: 'Electricity Bill', text: 'Electricity Bill'},
+        {value: 'WiFi Bill', text: 'WiFi Bill'},
+        {value: 'Building Rent', text: 'Building Rent'},
+        {value: 'Carpenter', text: 'Carpenter'},
+        {value: 'Transport', text: 'Transport'},
+        {value: 'Welder', text: 'Welder'},
+        {value: 'Event', text: 'Event'},
+        {value: 'Electrician', text: 'Electrician'},
+        {value: 'Maintain', text: 'Maintain'},
+        {value: 'Plumber', text: 'Plumber'},
+        {value: 'Painter', text: 'Painter'},
+        {value: 'Tools', text: 'Tools'},
+        {value: 'First Aid', text: 'First Aid'},
+        {value: 'Sports', text: 'Sports'},
+        {value: 'Exam', text: 'Exam'},
+        {value: 'Stationary', text: 'Stationary'},
+        {value: 'Food', text: 'Food'},
+        {value: 'Other', text: 'Other'}
+    ];
+
+    const dayChoices = [
+        {value: 'Monday', text: 'Monday'}, {value: 'Tuesday', text: 'Tuesday'},
+        {value: 'Wednesday', text: 'Wednesday'}, {value: 'Thursday', text: 'Thursday'},
+        {value: 'Friday', text: 'Friday'}, {value: 'Saturday', text: 'Saturday'},
+        {value: 'Sunday', text: 'Sunday'}
+    ];
+
+    const monthChoices = [
+        {value: 'January', text: 'January'}, {value: 'February', text: 'February'},
+        {value: 'March', text: 'March'}, {value: 'April', text: 'April'},
+        {value: 'May', text: 'May'}, {value: 'June', text: 'June'},
+        {value: 'July', text: 'July'}, {value: 'August', text: 'August'},
+        {value: 'September', text: 'September'}, {value: 'October', text: 'October'},
+        {value: 'November', text: 'November'}, {value: 'December', text: 'December'}
+    ];
+
+    function updateExpenseNameChoices(isDaily) {
+        // Clear current options
+        expenseNameSelect.innerHTML = '';
+
+        const choices = isDaily ? dailyNames : monthlyNames;
+
+        choices.forEach(choice => {
+            const option = document.createElement('option');
+            option.value = choice.value;
+            option.textContent = choice.text;
+            expenseNameSelect.appendChild(option);
+        });
+
+        // Trigger change event so other logic can react if needed
+        expenseNameSelect.dispatchEvent(new Event('change'));
+    }
+
+    function updatePeriodField(isDaily) {
+        if (periodLabel) {
+            periodLabel.textContent = isDaily ? 'Day Name' : 'Month Name';
+        }
+
+        // Update period choices
+        const periodChoices = isDaily ? dayChoices : monthChoices;
+        periodSelect.innerHTML = '';
+
+        periodChoices.forEach(choice => {
+            const option = document.createElement('option');
+            option.value = choice.value;
+            option.textContent = choice.text;
+            periodSelect.appendChild(option);
         });
     }
 
-    // Apply immediately and also after any dynamic changes
-    disableMouseWheel();
-
-    // ====================== DYNAMIC PERIOD FIELD (Month / Day) ======================
-    const expenseTypeField = document.getElementById('id_expense_type');
-    
-    function updatePeriodLabel() {
-        const periodLabel = document.querySelector('label[for="id_period"]');
-        if (periodLabel) {
-            if (expenseTypeField.value === 'Daily') {
-                periodLabel.textContent = 'Day Name';
-            } else {
-                periodLabel.textContent = 'Month Name';
-            }
-        }
+    function handleTypeChange() {
+        const isDaily = expenseTypeSelect.value === 'Daily';
+        updateExpenseNameChoices(isDaily);
+        updatePeriodField(isDaily);
     }
 
-    // Initial update
-    updatePeriodLabel();
+    // Initial setup
+    if (expenseTypeSelect) {
+        handleTypeChange();
+        expenseTypeSelect.addEventListener('change', handleTypeChange);
+    }
 
-    // Update when Expense Type changes
-    expenseTypeField.addEventListener('change', function() {
-        updatePeriodLabel();
-        // Optional: Auto submit to refresh choices (if you want backend refresh)
-        // this.form.submit();
+    // Disable mouse wheel on number inputs
+    document.querySelectorAll('input[type="number"]').forEach(input => {
+        input.addEventListener('wheel', function(e) {
+            e.preventDefault();
+            this.blur();
+        }, { passive: false });
     });
-
 });
 </script>
 {% endblock %}
