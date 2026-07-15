@@ -119,7 +119,8 @@ def bulk_promote_students(admission_ids, target_session, target_section, student
                 fee_structure.promotion_fee +
                 other_fee +
                 transport_fee -
-                (admission.discount or Decimal('0.00')) +
+                (admission.discount or Decimal('0.00')) -
+                (admission.admission_discount or Decimal('0.00')) +
                 previous_balance
             )
 
@@ -144,6 +145,7 @@ def bulk_promote_students(admission_ids, target_session, target_section, student
                 route=admission.route,
                 driver_contact=admission.driver_contact,
                 discount=admission.discount or Decimal('0.00'),
+                admission_discount=admission.admission_discount or Decimal('0.00'),
                 discount_behalf=admission.discount_behalf,
                 total_dues=total_dues,
                 received=Decimal('0.00'),

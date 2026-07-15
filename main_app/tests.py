@@ -7,6 +7,7 @@ from .models import (
     MonthlyFee, FeeStructure
 )
 from .forms import LoginForm, SchoolRegisterForm
+from .utils import calculate_total_dues
 from .view_helpers import bulk_promote_students
 
 
@@ -31,6 +32,24 @@ class AuthFormTests(TestCase):
         form = LoginForm(data={'username': ' admin ', 'password': ' secret '})
         self.assertEqual(form.data['username'], 'admin')
         self.assertEqual(form.data['password'], 'secret')
+
+
+class FeeCalculationTests(TestCase):
+    def test_calculate_total_dues_applies_one_time_admission_discount(self):
+        cleaned_data = {
+            'previous_balance': Decimal('100.00'),
+            'tuition_fee': Decimal('500.00'),
+            'exam_fee': Decimal('50.00'),
+            'book_fee': Decimal('20.00'),
+            'uniform_fee': Decimal('30.00'),
+            'promotion_fee': Decimal('0.00'),
+            'other_fee': Decimal('10.00'),
+            'transport_fee': Decimal('40.00'),
+            'discount': Decimal('0.00'),
+            'admission_discount': Decimal('60.00'),
+        }
+
+        self.assertEqual(calculate_total_dues(cleaned_data), Decimal('690.00'))
 
 
 class PromotionIntegrationTest(TestCase):

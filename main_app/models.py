@@ -336,6 +336,12 @@ class StudentAdmission(TimestampedModel):
     promotion_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
 
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    admission_discount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal('0.00'),
+        help_text="One-time discount applied to admission/promotion dues only"
+    )
     discount_behalf = models.CharField(max_length=20, choices=DISCOUNT_BEHALF_CHOICES, blank=True, null=True)
 
     transport = models.CharField(max_length=10, choices=[('Free', 'Free'), ('Paid', 'Paid'), ('No', 'No')], default='No')

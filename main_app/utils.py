@@ -230,7 +230,8 @@ def calculate_total_dues(cleaned_data):
     ]
     total = sum(cleaned_data.get(f) or Decimal('0.00') for f in fields)
     discount = cleaned_data.get('discount') or Decimal('0.00')
-    return max(total - discount, Decimal('0.00'))
+    admission_discount = cleaned_data.get('admission_discount') or Decimal('0.00')
+    return max(total - discount - admission_discount, Decimal('0.00'))
 
 
 
@@ -302,9 +303,11 @@ def create_repeat_admission(old_admission, academic_session, roll_number, operat
 
     received = Decimal('0.00')   # collected later via Monthly Fee page
 
+    admission_discount = old_admission.admission_discount or Decimal('0.00')
+
     total_dues = max(
         previous_balance + tuition_fee + exam_fee + book_fee + uniform_fee
-        + promotion_fee + other_fee + transport_fee - discount,
+        + promotion_fee + other_fee + transport_fee - discount - admission_discount,
         Decimal('0.00'),
     )
     balance = total_dues - received
@@ -328,6 +331,7 @@ def create_repeat_admission(old_admission, academic_session, roll_number, operat
             promotion_fee      = promotion_fee,
 
             discount           = discount,
+            admission_discount = admission_discount,
             discount_behalf    = discount_behalf,
 
             transport          = transport,

@@ -82,12 +82,14 @@
                                     <div class="col-md-4">{{ form.transport|as_crispy_field }}</div>
                                     <div class="col-md-4 transport-group">{{ form.vehicle_no|as_crispy_field }}</div>
                                     <div class="col-md-4 transport-group">{{ form.route|as_crispy_field }}</div>
-                                    <div class="col-md-4 transport-group">{{ form.driver_contact|as_crispy_field }}</div>
+                                    <div class="col-md-4 transport-group">{{ form.driver_contact|as_crispy_field }}
+                                    </div>
                                     <div class="col-md-4 transport-group">{{ form.transport_fee|as_crispy_field }}</div>
                                 </div>
                             </div>
 
                             <div class="col-md-4">{{ form.discount|as_crispy_field }}</div>
+                            <div class="col-md-4">{{ form.admission_discount|as_crispy_field }}</div>
                             <div class="col-md-4">{{ form.discount_behalf|as_crispy_field }}</div>
                             <div class="col-md-4">{{ form.received|as_crispy_field }}</div>
 
@@ -134,91 +136,91 @@
 {% block extra_js %}
 <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <script>
-$(document).ready(function() {
+    $(document).ready(function () {
 
 
-    // ====================== DISABLE MOUSE WHEEL ON NUMBER FIELDS ======================
-    function disableMouseWheelOnNumbers() {
-        $('input[type="number"]').on('wheel', function(e) {
-            e.preventDefault();           // Prevent scrolling
-            $(this).blur();               // Remove focus (best UX)
-        });
-
-        // Also handle when user focuses on the field
-        $('input[type="number"]').on('focus', function() {
-            $(this).on('wheel', function(e) {
-                e.preventDefault();
+        // ====================== DISABLE MOUSE WHEEL ON NUMBER FIELDS ======================
+        function disableMouseWheelOnNumbers() {
+            $('input[type="number"]').on('wheel', function (e) {
+                e.preventDefault();           // Prevent scrolling
+                $(this).blur();               // Remove focus (best UX)
             });
-        });
-    }
 
-    // Call the function
-    disableMouseWheelOnNumbers();
+            // Also handle when user focuses on the field
+            $('input[type="number"]').on('focus', function () {
+                $(this).on('wheel', function (e) {
+                    e.preventDefault();
+                });
+            });
+        }
 
-    // Auto fetch fees when class is selected
-    function fetchFeeStructure(className) {
-        if (!className) return;
-        $.ajax({
-            url: "{% url 'get_fee_structure' %}",
-            data: { class_name: className },
-            dataType: "json",
-            success: function (data) {
-                if (!data.error) {
-                    $('#id_tuition_fee').val(data.tuition_fee);
-                    $('#id_exam_fee').val(data.exam_fee);
-                    $('#id_book_fee').val(data.book_fee);
-                    $('#id_uniform_fee').val(data.uniform_fee);
-                    $('#id_other_fee').val(data.other_fee);
-                    $('#id_promotion_fee').val(data.promotion_fee);
-                    $('#id_transport_fee').val(data.transport_fee || 0);
+        // Call the function
+        disableMouseWheelOnNumbers();
+
+        // Auto fetch fees when class is selected
+        function fetchFeeStructure(className) {
+            if (!className) return;
+            $.ajax({
+                url: "{% url 'get_fee_structure' %}",
+                data: { class_name: className },
+                dataType: "json",
+                success: function (data) {
+                    if (!data.error) {
+                        $('#id_tuition_fee').val(data.tuition_fee);
+                        $('#id_exam_fee').val(data.exam_fee);
+                        $('#id_book_fee').val(data.book_fee);
+                        $('#id_uniform_fee').val(data.uniform_fee);
+                        $('#id_other_fee').val(data.other_fee);
+                        $('#id_promotion_fee').val(data.promotion_fee);
+                        $('#id_transport_fee').val(data.transport_fee || 0);
+                    }
+                    updateTotalDues();
                 }
-                updateTotalDues();
-            }
-        });
-    }
+            });
+        }
 
-    $('#id_class_name').on('change', function() {
-        fetchFeeStructure($(this).val());
+        $('#id_class_name').on('change', function () {
+            fetchFeeStructure($(this).val());
+        });
+
+        // Live Total Calculation
+        function updateTotalDues() {
+            let total = 0;
+            const fields = ['tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee'];
+
+            fields.forEach(field => {
+                total += parseFloat($('#id_' + field).val()) || 0;
+            });
+
+            const discount = parseFloat($('#id_discount').val()) || 0;
+            const admissionDiscount = parseFloat($('#id_admission_discount').val()) || 0;
+            const received = parseFloat($('#id_received').val()) || 0;
+            const totalDues = total - discount - admissionDiscount;
+            const balance = totalDues - received;
+
+            $('#totalDuesDisplay').text('Rs ' + totalDues.toFixed(0));
+            $('#receivedDisplay').text('Rs ' + received.toFixed(0));
+            $('#balanceDisplay').text('Rs ' + balance.toFixed(0));
+
+            // Update hidden fields
+            $('#id_total_dues').val(totalDues.toFixed(2));
+            $('#id_balance').val(balance.toFixed(2));
+        }
+
+        $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_admission_discount, #id_received').on('input', updateTotalDues);
+
+        // Transport toggle
+        function toggleTransportFields() {
+            const transport = $('#id_transport').val();
+            $('.transport-group').toggle(transport !== 'No');
+            if (transport === 'No') $('#id_transport_fee').val('0');
+        }
+
+        $('#id_transport').on('change', toggleTransportFields);
+        toggleTransportFields();
+
+        // Initial calculation
+        updateTotalDues();
     });
-
-    // Live Total Calculation
-    function updateTotalDues() {
-        let total = 0;
-        const fields = ['tuition_fee','exam_fee','book_fee','uniform_fee','other_fee','promotion_fee','transport_fee'];
-        
-        fields.forEach(field => {
-            total += parseFloat($('#id_' + field).val()) || 0;
-        });
-
-        const discount = parseFloat($('#id_discount').val()) || 0;
-        const received = parseFloat($('#id_received').val()) || 0;
-        const totalDues = total - discount;
-        const balance = totalDues - received;
-
-        $('#totalDuesDisplay').text('Rs ' + totalDues.toFixed(0));
-        $('#receivedDisplay').text('Rs ' + received.toFixed(0));
-        $('#balanceDisplay').text('Rs ' + balance.toFixed(0));
-
-        // Update hidden fields
-        $('#id_total_dues').val(totalDues.toFixed(2));
-        $('#id_balance').val(balance.toFixed(2));
-    }
-
-    $('#id_tuition_fee, #id_exam_fee, #id_book_fee, #id_uniform_fee, #id_other_fee, #id_promotion_fee, #id_transport_fee, #id_discount, #id_received').on('input', updateTotalDues);
-
-    // Transport toggle
-    function toggleTransportFields() {
-        const transport = $('#id_transport').val();
-        $('.transport-group').toggle(transport !== 'No');
-        if (transport === 'No') $('#id_transport_fee').val('0');
-    }
-
-    $('#id_transport').on('change', toggleTransportFields);
-    toggleTransportFields();
-
-    // Initial calculation
-    updateTotalDues();
-});
 </script>
 {% endblock %}
-

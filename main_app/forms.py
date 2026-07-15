@@ -376,7 +376,7 @@ class EditStudentForm(forms.ModelForm):
             'class_name', 'section', 'roll_number', 'admission_date', 'class_teacher',
             'admission_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee',
             'transport', 'vehicle_no', 'route', 'driver_contact', 'transport_fee',
-            'discount', 'discount_behalf', 'received', 'total_dues', 'balance',
+            'discount', 'admission_discount', 'discount_behalf', 'received', 'total_dues', 'balance',
         ]
         widgets = {
             'class_name': forms.Select(attrs={'class': 'form-control'}),
@@ -397,6 +397,7 @@ class EditStudentForm(forms.ModelForm):
             'driver_contact': forms.TextInput(attrs={'class': 'form-control'}),
             'transport_fee': forms.NumberInput(attrs={'class': 'form-control'}),
             'discount': forms.NumberInput(attrs={'class': 'form-control'}),
+            'admission_discount': forms.NumberInput(attrs={'class': 'form-control'}),
             'discount_behalf': forms.Select(attrs={'class': 'form-control'}),
             'received': forms.NumberInput(attrs={'class': 'form-control'}),
             'total_dues': forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
@@ -407,6 +408,7 @@ class EditStudentForm(forms.ModelForm):
         self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
         self.fields['section'].choices = [('', 'Select Section')] + SECTION_CHOICES
+        self.fields['discount'].label = 'Monthly Fee Discount'
         self.fields['discount_behalf'].choices = [('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES
         self.helper = FormHelper()
         self.helper.form_method = 'POST'
@@ -473,7 +475,8 @@ class EditStudentForm(forms.ModelForm):
             Decimal(str(admission.other_fee or 0.00)) +
             Decimal(str(admission.promotion_fee or 0.00)) +
             Decimal(str(admission.transport_fee or 0.00)) -
-            Decimal(str(admission.discount or 0.00))
+            Decimal(str(admission.discount or 0.00)) -
+            Decimal(str(admission.admission_discount or 0.00))
         )
         admission.balance = admission.total_dues - Decimal(str(admission.received or 0.00))
         if commit:
@@ -536,6 +539,13 @@ class StudentAdmissionForm(forms.ModelForm):
     image = forms.ImageField(required=False, widget=forms.FileInput(attrs={'class': 'form-control'}))
 
     transport_fee = forms.DecimalField(max_digits=8, decimal_places=2, required=False, widget=NumberInput(attrs={'class': 'form-control transport-field', 'step': '0.01'}))
+    admission_discount = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        initial=Decimal('0.00'),
+        widget=NumberInput(attrs={'class': 'form-control', 'step': '0.01'})
+    )
 
     # Hidden fields for new admission (forced to 0)
     previous_balance = forms.DecimalField(
@@ -585,6 +595,7 @@ class StudentAdmissionForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
 
         self.fields['section'].choices = [('', 'Select Section')] + SECTION_CHOICES
+        self.fields['discount'].label = 'Monthly Fee Discount'
         self.fields['discount_behalf'].choices = [('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES
 
         self.helper = FormHelper()
@@ -593,6 +604,7 @@ class StudentAdmissionForm(forms.ModelForm):
 
         self.fields['promoted'].initial = False
         self.fields['promoted'].widget.attrs['disabled'] = True
+        self.fields['admission_discount'].initial = Decimal('0.00')
 
         # Force defaults for new admission
         self.fields['previous_balance'].initial = Decimal('0.00')
@@ -662,6 +674,7 @@ class StudentAdmissionForm(forms.ModelForm):
             if cleaned_data.get(field) is None:
                 cleaned_data[field] = Decimal('0.00')
 
+        cleaned_data['admission_discount'] = cleaned_data.get('admission_discount') or Decimal('0.00')
         cleaned_data['promotion_fee'] = Decimal('0.00')
         cleaned_data['promoted'] = False
 
@@ -687,8 +700,20 @@ class StudentAdmissionForm(forms.ModelForm):
         admission.closing_balance = admission.balance or Decimal('0.00')
 
         admission.admission_fee = admission.admission_fee or Decimal('0.00')
-        admission.total_dues = admission.total_dues or Decimal('0.00')
-        admission.balance = admission.balance or Decimal('0.00')
+        admission.admission_discount = self.cleaned_data.get('admission_discount') or Decimal('0.00')
+        admission.total_dues = (
+            (admission.admission_fee or Decimal('0.00')) +
+            (admission.tuition_fee or Decimal('0.00')) +
+            (admission.exam_fee or Decimal('0.00')) +
+            (admission.book_fee or Decimal('0.00')) +
+            (admission.uniform_fee or Decimal('0.00')) +
+            (admission.other_fee or Decimal('0.00')) +
+            (admission.promotion_fee or Decimal('0.00')) +
+            (admission.transport_fee or Decimal('0.00')) -
+            (admission.discount or Decimal('0.00')) -
+            (admission.admission_discount or Decimal('0.00'))
+        )
+        admission.balance = admission.total_dues - (admission.received or Decimal('0.00'))
 
         if admission.roll_number:
             admission.roll_number = int(admission.roll_number)
@@ -892,6 +917,12 @@ class PromoteExistingStudentForm(forms.ModelForm):
     other_fee = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control'}))
     transport_fee = forms.DecimalField(max_digits=8, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control transport-field'}))
     discount = forms.DecimalField(max_digits=10, decimal_places=2, required=False, widget=forms.NumberInput(attrs={'class': 'form-control'}))
+    admission_discount = forms.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        required=False,
+        widget=forms.NumberInput(attrs={'class': 'form-control'})
+    )
     discount_behalf = forms.ChoiceField(
         choices=[('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES,
         required=False,
@@ -961,6 +992,7 @@ class PromoteExistingStudentForm(forms.ModelForm):
         self.fields['route'].initial = old.route
         self.fields['driver_contact'].initial = old.driver_contact
         self.fields['discount'].initial = old.discount or Decimal('0.00')
+        self.fields['admission_discount'].initial = old.admission_discount or Decimal('0.00')
         self.fields['discount_behalf'].initial = old.discount_behalf
         self.fields['received'].initial = Decimal('0.00')
 
@@ -1036,6 +1068,7 @@ class PromoteExistingStudentForm(forms.ModelForm):
         new_admission.promotion_fee    = self.cleaned_data.get('promotion_fee') or Decimal('0.00')
         new_admission.other_fee        = self.cleaned_data.get('other_fee') or Decimal('0.00')
         new_admission.discount         = self.cleaned_data.get('discount') or Decimal('0.00')
+        new_admission.admission_discount = self.cleaned_data.get('admission_discount') or Decimal('0.00')
         new_admission.discount_behalf  = self.cleaned_data.get('discount_behalf')
         new_admission.transport_fee    = self.cleaned_data.get('transport_fee') or Decimal('0.00')
 
