@@ -4,6 +4,8 @@ import os
 from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
+
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -66,6 +68,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'cloudinary',
+    'cloudinary_storage',
     'main_app',
     'import_export',
     'crispy_forms',
@@ -207,6 +211,22 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 TEMP_DIR = os.path.join(MEDIA_ROOT, 'temp')
 if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
+
+
+
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME"),
+    "API_KEY": os.getenv("CLOUDINARY_API_KEY"),
+    "API_SECRET": os.getenv("CLOUDINARY_API_SECRET"),
+}
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}    
 
 # Custom user model
 AUTH_USER_MODEL = 'main_app.CustomUser'

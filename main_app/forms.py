@@ -368,6 +368,8 @@ class EditStudentForm(forms.ModelForm):
     date_of_birth = forms.DateField(widget=DateInput(attrs={'type': 'date', 'class': 'form-control'}))
     gender = forms.ChoiceField(choices=[('Male', 'Male'), ('Female', 'Female')], widget=forms.Select(attrs={'class': 'form-control'}))
     image = forms.ImageField(required=False, widget=forms.FileInput(attrs={'class': 'form-control'}))
+    transport_fee = forms.DecimalField(max_digits=8, decimal_places=2, required=False, widget=NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
+    admission_discount = forms.DecimalField(max_digits=10, decimal_places=2, required=False, initial=Decimal('0.00'), widget=NumberInput(attrs={'class': 'form-control', 'step': '0.01'}))
 
     class Meta:
         model = StudentAdmission
@@ -395,9 +397,7 @@ class EditStudentForm(forms.ModelForm):
             'vehicle_no': forms.TextInput(attrs={'class': 'form-control'}),
             'route': forms.TextInput(attrs={'class': 'form-control'}),
             'driver_contact': forms.TextInput(attrs={'class': 'form-control'}),
-            'transport_fee': forms.NumberInput(attrs={'class': 'form-control'}),
             'discount': forms.NumberInput(attrs={'class': 'form-control'}),
-            'admission_discount': forms.NumberInput(attrs={'class': 'form-control'}),
             'discount_behalf': forms.Select(attrs={'class': 'form-control'}),
             'received': forms.NumberInput(attrs={'class': 'form-control'}),
             'total_dues': forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'}),
@@ -410,6 +410,7 @@ class EditStudentForm(forms.ModelForm):
         self.fields['section'].choices = [('', 'Select Section')] + SECTION_CHOICES
         self.fields['discount'].label = 'Monthly Fee Discount'
         self.fields['discount_behalf'].choices = [('', 'Select Discount Behalf')] + StudentAdmission.DISCOUNT_BEHALF_CHOICES
+        self.fields['admission_discount'].initial = Decimal('0.00')
         self.helper = FormHelper()
         self.helper.form_method = 'POST'
         self.helper.add_input(Submit('submit', 'Update'))
@@ -422,6 +423,51 @@ class EditStudentForm(forms.ModelForm):
             self.fields['date_of_birth'].initial = student.date_of_birth
             self.fields['gender'].initial = student.gender
             self.fields['image'].initial = student.image
+
+            active_session = None
+            if self.user and getattr(self.user, 'school', None):
+                active_session = AcademicSession.objects.filter(is_active=True, school=self.user.school).first()
+
+            if active_session and self.instance.class_name:
+                fee_structure = FeeStructure.objects.filter(
+                    class_name=self.instance.class_name,
+                    academic_session=active_session,
+                ).first()
+                if fee_structure:
+                    fallback_fields = {
+                        'admission_fee': fee_structure.admission_fee,
+                        'tuition_fee': fee_structure.tuition_fee,
+                        'exam_fee': fee_structure.paper_money,
+                        'book_fee': fee_structure.books_dues,
+                        'uniform_fee': fee_structure.uniform_dues,
+                        'other_fee': fee_structure.other_charges,
+                        'promotion_fee': fee_structure.promotion_fee,
+                    }
+                    for field_name, fallback_value in fallback_fields.items():
+                        current_value = getattr(self.instance, field_name, None)
+                        if current_value in [None, '', Decimal('0.00'), 0, 0.0]:
+                            self.fields[field_name].initial = fallback_value
+
+            total_dues_value = self.instance.total_dues
+            if total_dues_value in [None, '', Decimal('0.00'), 0, 0.0]:
+                total_dues_value = Decimal('0.00')
+                for field_name in ['admission_fee', 'tuition_fee', 'exam_fee', 'book_fee', 'uniform_fee', 'other_fee', 'promotion_fee', 'transport_fee']:
+                    raw_value = self.fields[field_name].initial
+                    if raw_value in [None, '', Decimal('0.00'), 0, 0.0]:
+                        raw_value = getattr(self.instance, field_name, None)
+                    if raw_value in [None, '', Decimal('0.00'), 0, 0.0]:
+                        continue
+                    total_dues_value += Decimal(str(raw_value))
+                total_dues_value = max(
+                    total_dues_value
+                    - Decimal(str(self.instance.discount or Decimal('0.00')))
+                    - Decimal(str(self.instance.admission_discount or Decimal('0.00'))),
+                    Decimal('0.00'),
+                )
+
+            balance_value = total_dues_value - Decimal(str(self.instance.received or Decimal('0.00')))
+            self.fields['total_dues'].initial = total_dues_value
+            self.fields['balance'].initial = balance_value
 
     def clean_roll_number(self):
         roll_number = self.cleaned_data.get('roll_number')
@@ -447,6 +493,12 @@ class EditStudentForm(forms.ModelForm):
         cleaned_data = validate_transport(cleaned_data, self)
         if not cleaned_data.get('section'):
             self.add_error('section', 'Section name is required.')
+        if not cleaned_data.get('class_name'):
+            self.add_error('class_name', 'Class name is required.')
+        if not cleaned_data.get('roll_number'):
+            self.add_error('roll_number', 'Roll number is required.')
+        cleaned_data['promotion_fee'] = cleaned_data.get('promotion_fee') or Decimal('0.00')
+        cleaned_data['admission_discount'] = cleaned_data.get('admission_discount') or Decimal('0.00')
         if cleaned_data.get('discount', Decimal('0.00')) > 0 and not cleaned_data.get('discount_behalf'):
             self.add_error('discount_behalf', 'Please specify the behalf for the discount.')
         return cleaned_data
@@ -459,13 +511,16 @@ class EditStudentForm(forms.ModelForm):
         student.contact = self.cleaned_data['contact']
         student.date_of_birth = self.cleaned_data['date_of_birth']
         student.gender = self.cleaned_data['gender']
-        if self.cleaned_data['image']:
+        if self.cleaned_data.get('image'):
             student.image = self.cleaned_data['image']
         student.school = self.user.school if self.user and self.user.school else None
         if commit:
             student.save()
+
         admission = super().save(commit=False)
         admission.operator = self.user
+        admission.promotion_fee = self.cleaned_data.get('promotion_fee') or Decimal('0.00')
+        admission.admission_discount = self.cleaned_data.get('admission_discount') or Decimal('0.00')
         admission.total_dues = (
             Decimal(str(admission.admission_fee or 0.00)) +
             Decimal(str(admission.tuition_fee or 0.00)) +
@@ -701,19 +756,30 @@ class StudentAdmissionForm(forms.ModelForm):
 
         admission.admission_fee = admission.admission_fee or Decimal('0.00')
         admission.admission_discount = self.cleaned_data.get('admission_discount') or Decimal('0.00')
-        admission.total_dues = (
-            (admission.admission_fee or Decimal('0.00')) +
-            (admission.tuition_fee or Decimal('0.00')) +
-            (admission.exam_fee or Decimal('0.00')) +
-            (admission.book_fee or Decimal('0.00')) +
-            (admission.uniform_fee or Decimal('0.00')) +
-            (admission.other_fee or Decimal('0.00')) +
-            (admission.promotion_fee or Decimal('0.00')) +
-            (admission.transport_fee or Decimal('0.00')) -
-            (admission.discount or Decimal('0.00')) -
-            (admission.admission_discount or Decimal('0.00'))
-        )
-        admission.balance = admission.total_dues - (admission.received or Decimal('0.00'))
+
+        submitted_total_dues = self.cleaned_data.get('total_dues')
+        submitted_balance = self.cleaned_data.get('balance')
+
+        if submitted_total_dues is not None:
+            admission.total_dues = submitted_total_dues
+        else:
+            admission.total_dues = (
+                (admission.admission_fee or Decimal('0.00')) +
+                (admission.tuition_fee or Decimal('0.00')) +
+                (admission.exam_fee or Decimal('0.00')) +
+                (admission.book_fee or Decimal('0.00')) +
+                (admission.uniform_fee or Decimal('0.00')) +
+                (admission.other_fee or Decimal('0.00')) +
+                (admission.promotion_fee or Decimal('0.00')) +
+                (admission.transport_fee or Decimal('0.00')) -
+                (admission.discount or Decimal('0.00')) -
+                (admission.admission_discount or Decimal('0.00'))
+            )
+
+        if submitted_balance is not None:
+            admission.balance = submitted_balance
+        else:
+            admission.balance = admission.total_dues - (admission.received or Decimal('0.00'))
 
         if admission.roll_number:
             admission.roll_number = int(admission.roll_number)
@@ -1016,6 +1082,15 @@ class PromoteExistingStudentForm(forms.ModelForm):
                 self.fields['other_fee'].initial = fee.other_charges or Decimal('0.00')
         except Exception as e:
             print(f"Warning: Fee structure not found for {target_class}: {e}")
+
+        # Promotion flow should not carry admission fee from the prior admission.
+        self.fields['admission_fee'] = forms.DecimalField(
+            max_digits=10,
+            decimal_places=2,
+            required=False,
+            initial=Decimal('0.00'),
+            widget=forms.NumberInput(attrs={'class': 'form-control', 'readonly': 'readonly'})
+        )
 
 
     def clean(self):

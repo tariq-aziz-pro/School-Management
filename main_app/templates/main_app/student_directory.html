@@ -98,13 +98,15 @@
                         <option value="">All Statuses</option>
                         <option value="new" {% if filter_status == 'new' %}selected{% endif %}>New Admission</option>
                         <option value="promoted" {% if filter_status == 'promoted' %}selected{% endif %}>Promoted</option>
-                        <option value="not_promoted" {% if filter_status == 'not_promoted' %}selected{% endif %}>Not Promoted</option>
+                        <option value="not_promoted" {% if filter_status == 'not_promoted' %}selected{% endif %}>Not
+                            Promoted</option>
                     </select>
                 </div>
 
                 <div class="col-md-4">
                     <label class="form-label small">Search (name, ID, father, contact)</label>
-                    <input type="text" name="search" class="form-control" value="{{ search_query }}" placeholder="Search students...">
+                    <input type="text" name="search" class="form-control" value="{{ search_query }}"
+                        placeholder="Search students...">
                 </div>
 
                 <div class="col-md-2">
@@ -146,19 +148,28 @@
                         </td>
                         <td>{{ admission.student.contact }}</td>
                         <td>
-                            <span class="{% if admission.outstanding > 0 %}text-danger{% else %}text-success{% endif %} fw-semibold">
+                            <span
+                                class="{% if admission.outstanding > 0 %}text-danger{% else %}text-success{% endif %} fw-semibold">
                                 Rs {{ admission.outstanding|floatformat:2 }}
                             </span>
                         </td>
                         <td>
-                            <a href="{% url 'student_profile' admission.student.student_id %}" class="btn btn-sm btn-outline-primary">
-                                View Profile
-                            </a>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <a href="{% url 'student_profile' admission.student.student_id %}"
+                                    class="btn btn-outline-primary">
+                                    View Profile
+                                </a>
+                                <a href="{% url 'edit_student' admission.student.student_id %}"
+                                    class="btn btn-outline-warning">
+                                    Edit Student
+                                </a>
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-4">No students found matching these filters.</td>
+                        <td colspan="9" class="text-center text-muted py-4">No students found matching these filters.
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -172,7 +183,8 @@
         <ul class="pagination justify-content-center">
             {% if page_obj.has_previous %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ page_obj.previous_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Previous</a>
+                <a class="page-link"
+                    href="?page={{ page_obj.previous_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Previous</a>
             </li>
             {% endif %}
             <li class="page-item disabled">
@@ -180,7 +192,8 @@
             </li>
             {% if page_obj.has_next %}
             <li class="page-item">
-                <a class="page-link" href="?page={{ page_obj.next_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Next</a>
+                <a class="page-link"
+                    href="?page={{ page_obj.next_page_number }}&class_name={{ filter_class }}&section={{ filter_section }}&status={{ filter_status }}&search={{ search_query|urlencode }}">Next</a>
             </li>
             {% endif %}
         </ul>

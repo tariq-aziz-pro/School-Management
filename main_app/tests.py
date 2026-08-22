@@ -6,7 +6,7 @@ from .models import (
     CustomUser, School, AcademicSession, Student, StudentAdmission,
     MonthlyFee, FeeStructure
 )
-from .forms import LoginForm, SchoolRegisterForm
+from .forms import LoginForm, SchoolRegisterForm, StudentAdmissionForm
 from .utils import calculate_total_dues
 from .view_helpers import bulk_promote_students
 
@@ -50,6 +50,46 @@ class FeeCalculationTests(TestCase):
         }
 
         self.assertEqual(calculate_total_dues(cleaned_data), Decimal('690.00'))
+
+    def test_student_admission_form_uses_submitted_total_and_balance(self):
+        form = StudentAdmissionForm(data={
+            'first_name': 'Ali',
+            'last_name': 'Khan',
+            'father_guardian_name': 'Bilal Khan',
+            'contact': '+923001234567',
+            'date_of_birth': '2010-01-01',
+            'gender': 'Male',
+            'class_name': 'Class 1',
+            'section': 'A_Red',
+            'roll_number': '1',
+            'admission_date': date.today().isoformat(),
+            'class_teacher': 'Teacher A',
+            'admission_fee': '0',
+            'tuition_fee': '8000',
+            'exam_fee': '0',
+            'book_fee': '0',
+            'uniform_fee': '0',
+            'other_fee': '0',
+            'promotion_fee': '0',
+            'transport': 'No',
+            'transport_fee': '0',
+            'discount': '0',
+            'admission_discount': '0',
+            'discount_behalf': '',
+            'received': '7000',
+            'total_dues': '8000.00',
+            'balance': '1000.00',
+            'previous_balance': '0.00',
+            'closing_balance': '0.00',
+            'promoted': 'False',
+            'status': 'True',
+        })
+
+        self.assertTrue(form.is_valid(), form.errors)
+        admission = form.save(commit=False)
+
+        self.assertEqual(admission.total_dues, Decimal('8000.00'))
+        self.assertEqual(admission.balance, Decimal('1000.00'))
 
 
 class PromotionIntegrationTest(TestCase):

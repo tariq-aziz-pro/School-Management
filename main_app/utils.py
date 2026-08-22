@@ -6,6 +6,7 @@ from .models import AcademicSession, MonthlyFee, StudentAdmission, FeeStructure
 from django.db.models import OuterRef, Subquery, F
 from django.db.models.functions import Coalesce
 
+
 def generate_session_months(session):
     """
     Returns an ordered list of dicts covering every month of the session.
@@ -385,3 +386,8 @@ def annotate_outstanding(queryset):
     return queryset.annotate(
         outstanding=Coalesce(Subquery(latest_fee_balance), F('balance'))
     )
+
+
+
+
+

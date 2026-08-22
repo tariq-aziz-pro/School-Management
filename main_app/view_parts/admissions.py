@@ -448,7 +448,14 @@ def admission_success(request, student_id):
         messages.error(request, "No active session found.")
         return redirect('dashboard')
     student = get_object_or_404(Student, student_id=student_id, school=request.user.school)
-    admission = get_object_or_404(StudentAdmission, student=student, academic_session=active_session)
+    admission = (
+        StudentAdmission.objects
+        .filter(student=student, academic_session=active_session)
+        .order_by('-id')
+        .first()
+    )
+    if not admission:
+        return redirect('dashboard')
     return render(request, 'main_app/admission_success.html', {'student': student, 'admission': admission})
 
 

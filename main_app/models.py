@@ -7,7 +7,7 @@ from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 import secrets
 import string
-
+from main_app.cloudinary_utils import delete_cloudinary_file
 # ====================== GLOBAL CHOICES ======================
 CLASS_CHOICES = [
     ("PG", "PG"), ("Nursery", "Nursery"), ("KG", "KG"),
@@ -81,22 +81,43 @@ class CustomUser(AbstractUser, TimestampedModel):
 # ====================== SCHOOL ======================
 class School(TimestampedModel):
     school_name = models.CharField(max_length=200, unique=True)
-    school_logo = models.ImageField(upload_to='school_logos/', null=True, blank=True)
+    school_logo = models.ImageField(
+        upload_to='school_logos/',
+        null=True,
+        blank=True
+    )
     city = models.CharField(max_length=100)
     owner_name = models.CharField(max_length=100)
-    contact_number = models.CharField(max_length=15, validators=[
-        RegexValidator(r'^\+?\d{10,15}$', "Enter a valid phone number.")
-    ])
+    contact_number = models.CharField(
+        max_length=15,
+        validators=[
+            RegexValidator(
+                r'^\+?\d{10,15}$',
+                "Enter a valid phone number."
+            )
+        ]
+    )
     number_of_students = models.PositiveIntegerField(default=0)
+
     admin_user = models.OneToOneField(
-        CustomUser, on_delete=models.CASCADE,
-        related_name='school_admin', limit_choices_to={'user_type': 1}
+        CustomUser,
+        on_delete=models.CASCADE,
+        related_name='school_admin',
+        limit_choices_to={'user_type': 1}
     )
 
-    open_time  = models.TimeField(null=True, blank=True,
-                      help_text="School opening time (e.g. 08:00)")
-    close_time = models.TimeField(null=True, blank=True,
-                      help_text="School closing time (e.g. 14:00)")
+    open_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="School opening time (e.g. 08:00)"
+    )
+
+    close_time = models.TimeField(
+        null=True,
+        blank=True,
+        help_text="School closing time (e.g. 14:00)"
+    )
+
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -106,6 +127,42 @@ class School(TimestampedModel):
             models.Index(fields=['is_active']),
             models.Index(fields=['city']),
         ]
+
+    def save(self, *args, **kwargs):
+        """
+        Automatically delete the old logo from Cloudinary when:
+        1. A new logo replaces the old one.
+        2. The logo is removed completely.
+        """
+        if self.pk:
+            try:
+                old = School.objects.get(pk=self.pk)
+
+                # Logo removed
+                if old.school_logo and not self.school_logo:
+                    delete_cloudinary_file(old.school_logo)
+
+                # Logo replaced
+                elif (
+                    old.school_logo
+                    and self.school_logo
+                    and old.school_logo.name != self.school_logo.name
+                ):
+                    delete_cloudinary_file(old.school_logo)
+
+            except School.DoesNotExist:
+                pass
+
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """
+        Delete the logo from Cloudinary before deleting the school.
+        """
+        if self.school_logo:
+            delete_cloudinary_file(self.school_logo)
+
+        super().delete(*args, **kwargs)
 
     def __str__(self):
         return self.school_name
@@ -292,20 +349,42 @@ class Student(TimestampedModel):
         ]
 
     def save(self, *args, **kwargs):
+        # Delete old image if a new one is uploaded
+        if self.pk:
+            try:
+                old = Student.objects.get(pk=self.pk)
+
+                if old.image and old.image.name != self.image.name:
+                    delete_cloudinary_file(old.image)
+
+            except Student.DoesNotExist:
+                pass
+
         if not self.student_id:
             with transaction.atomic():
                 last_student = Student.objects.select_for_update().filter(
                     school=self.school
                 ).order_by('created_at').last()
+
                 school_prefix = self.school.id if self.school_id else 0
                 last_id = 0
+
                 if last_student and getattr(last_student, 'student_id', None):
                     try:
                         last_id = int(str(last_student.student_id).split('-')[-1])
                     except (ValueError, TypeError):
                         last_id = 0
+
                 self.student_id = f"SCH{school_prefix}-{last_id + 1:04d}"
+
         super().save(*args, **kwargs)
+
+
+    def delete(self, *args, **kwargs):
+        if self.image:
+            delete_cloudinary_file(self.image)
+
+        super().delete(*args, **kwargs)
 
     def __str__(self):
         return f"{self.first_name} {self.last_name} ({self.student_id})"
